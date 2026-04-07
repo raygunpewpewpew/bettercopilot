@@ -2,7 +2,7 @@
 from typing import Optional
 
 try:
-    from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel
+    from PySide6.QtWidgets import QStatusBar, QLabel
     from PySide6.QtCore import Signal
     PYSIDE = True
 except Exception:
@@ -25,16 +25,21 @@ class SimpleSignal:
 
 
 if PYSIDE:
-    class StatusBar(QWidget):
+    class StatusBar(QStatusBar):
         def __init__(self, parent=None):
             super().__init__(parent)
-            self.layout = QHBoxLayout()
-            self.label = QLabel('Ready')
-            self.layout.addWidget(self.label)
-            self.setLayout(self.layout)
+            self._label = QLabel('Ready')
+            self.addWidget(self._label)
 
         def set_message(self, msg: Optional[str]):
-            self.label.setText(msg or '')
+            try:
+                # QStatusBar provides showMessage; use it for consistency
+                self.showMessage(msg or '')
+            except Exception:
+                try:
+                    self._label.setText(msg or '')
+                except Exception:
+                    pass
 
 else:
     class StatusBar:

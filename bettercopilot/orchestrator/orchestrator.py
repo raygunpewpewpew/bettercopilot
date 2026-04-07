@@ -11,7 +11,7 @@ This orchestrator implements a richer meta-critic loop:
 The result is a structured dict containing final text, diffs, logs, tool_calls
 and critic feedback.
 """
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Callable
 from difflib import unified_diff
 import logging
 import time
@@ -26,13 +26,21 @@ from ..logging import init_run, log_event, write_summary
 
 
 class Orchestrator:
-    def __init__(self, providers: Dict[str, Any], mcp_registry, context_builder=None):
+    def __init__(self, providers: Dict[str, Any], mcp_registry, context_builder=None, progress_callback: Optional[Callable] = None):
         self.logger = logging.getLogger("Orchestrator")
         self.providers = providers
         self.mcp_registry = mcp_registry
         self.tool_router = ToolRouter(mcp_registry)
         self.context_builder = context_builder
         self.policy_engine = PolicyEngine()
+        self.progress_callback = progress_callback
+
+    def _emit_progress(self, event: str, data: Optional[Dict[str, Any]] = None):
+        if callable(self.progress_callback):
+            try:
+                self.progress_callback(event, data)
+            except Exception:
+                pass
 
     def _build_messages(self, goal: str, context_obj: Optional[Context], previous_iterations: List[Dict]) -> List[Dict[str, str]]:
         messages: List[Dict[str, str]] = []
@@ -103,17 +111,44 @@ class Orchestrator:
         # Initialize run logging
         run_id = init_run({"task_id": task.id, "goal": task.goal, "provider": provider_name})
         log_event(run_id, {"level": "info", "type": "task_start", "task": task.id})
+        # Emit progress event for task start
+        try:
+            self._emit_progress('task_start', {"task_id": task.id, "goal": task.goal, "provider": provider_name})
+        except Exception:
+            pass
 
         attempt = 0
+        last_out = None
         while attempt < max_retries:
             attempt += 1
             messages = self._build_messages(task.goal, context_obj, previous_iterations)
-
             self.logger.info("[provider_call] provider=%s attempt=%d", provider_name, attempt)
             start_t = time.time()
             try:
+                # notify that provider call is starting
+                try:
+                    self._emit_progress('provider_call_start', {'provider': provider_name, 'attempt': attempt})
+                except Exception:
+                    pass
+
                 out = gen.generate(messages, tools=task.tools)
+                last_out = out
+
+                # provider call finished
+                try:
+                    preview = ((out.get('text') or '')[:400]) if isinstance(out, dict) else ''
+                except Exception:
+                    preview = ''
+                try:
+                    self._emit_progress('provider_call_end', {'provider': provider_name, 'attempt': attempt, 'preview': preview})
+                except Exception:
+                    pass
+
             except Exception as e:
+                try:
+                    self._emit_progress('provider_error', {'attempt': attempt, 'error': str(e)})
+                except Exception:
+                    pass
                 self.logger.exception("Provider generate failed: %s", e)
                 logs.append({"attempt": attempt, "provider_error": str(e)})
                 log_event(run_id, {"level": "error", "type": "provider_error", "attempt": attempt, "error": str(e)})
@@ -138,13 +173,29 @@ class Orchestrator:
                     log_event(run_id, {"level": "error", "type": "tool_call_error", "tool": tc.get('tool'), "error": str(e)})
 
             # Critic evaluation
+            try:
+                self._emit_progress('critic_start', {'attempt': attempt})
+            except Exception:
+                pass
             eval_res = critic.evaluate(out, task.policies or self.policy_engine.list_policies())
+            try:
+                self._emit_progress('critic_end', eval_res)
+            except Exception:
+                pass
             logs.append({"attempt": attempt, "critic_evaluation": eval_res})
             critic_feedback.append(eval_res)
             log_event(run_id, {"level": "info", "type": "critic_evaluation", "attempt": attempt, "evaluation": eval_res})
 
             # Policy assessment & auto-fix
+            try:
+                self._emit_progress('policy_assessment_start', {'attempt': attempt})
+            except Exception:
+                pass
             assessment = self.policy_engine.assess(out.get('text', ''), task.policies or self.policy_engine.list_policies())
+            try:
+                self._emit_progress('policy_assessment_end', assessment)
+            except Exception:
+                pass
             logs.append({"attempt": attempt, "policy_assessment": assessment})
             log_event(run_id, {"level": "info", "type": "policy_assessment", "attempt": attempt, "assessment": assessment})
 
@@ -161,6 +212,10 @@ class Orchestrator:
                 final_output = assessment.get('corrected_code') or out.get('text')
                 logs.append({"attempt": attempt, "result": "accepted"})
                 log_event(run_id, {"level": "info", "type": "accepted", "attempt": attempt})
+                try:
+                    self._emit_progress('responding', {'final_output': final_output})
+                except Exception:
+                    pass
                 break
 
             # Refinement step: try to auto-fix or request retry
@@ -173,6 +228,10 @@ class Orchestrator:
                 logs.append({"attempt": attempt, "result": "fixed_and_accepted"})
                 diffs.append(Context.compute_diffs(out.get('text', ''), final_output))
                 log_event(run_id, {"level": "info", "type": "fixed_output", "attempt": attempt})
+                try:
+                    self._emit_progress('responding', {'final_output': final_output})
+                except Exception:
+                    pass
                 break
 
             # Prepare a brief assistant message describing the critic feedback for retry
@@ -186,5 +245,23 @@ class Orchestrator:
             "tool_calls": tool_calls_executed,
             "critic_feedback": critic_feedback,
         }
+        # If critic never accepted but provider produced some text, expose it as final_text
+        if result.get('final_text') is None and last_out is not None:
+            try:
+                candidate = None
+                if isinstance(last_out, dict):
+                    candidate = last_out.get('text') or (last_out.get('raw') or {}).get('output') or None
+                if candidate:
+                    result['final_text'] = candidate
+                    try:
+                        self._emit_progress('responding', {'final_output': result['final_text']})
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         write_summary(run_id, result)
+        try:
+            self._emit_progress('done', {'task_id': task.id})
+        except Exception:
+            pass
         return result

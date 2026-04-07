@@ -1,0 +1,2 @@
+{"run_id": "1775581854243", "event": "init", "ts": 1775581854.243742, "metadata": {"task_id": "d9c9ad32-52e2-40bf-a6e7-7e709dcd4126", "goal": "Hello from end-to-end headless run", "provider": "ollama"}}
+{"run_id": "1775581854243", "event": {"level": "info", "type": "task_start", "task": "d9c9ad32-52e2-40bf-a6e7-7e709dcd4126"}, "ts": 1775581854.2480597}

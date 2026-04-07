@@ -43,12 +43,12 @@ if PYSIDE:
             self.view = QTreeView(self)
             self.view.setModel(self.model)
             self.view.setRootIndex(self.model.index(root))
-                self._current_file = None
-                self.view.clicked.connect(self._on_clicked)
+            self._current_file = None
+            self.view.clicked.connect(self._on_clicked)
 
         def _on_clicked(self, index: QModelIndex):
             path = self.model.filePath(index)
-                self._current_file = path
+            self._current_file = path
             self.file_selected.emit(path)
 
         def select_file(self, path: str):
@@ -56,11 +56,11 @@ if PYSIDE:
             idx = self.model.index(path)
             if idx.isValid():
                 self.view.setCurrentIndex(idx)
-                    self._current_file = path
-                    self.file_selected.emit(path)
+                self._current_file = path
+                self.file_selected.emit(path)
 
-            def current_file(self) -> str:
-                return self._current_file
+        def current_file(self) -> str:
+            return self._current_file
 
 else:
     class FileTreePanel:
@@ -70,7 +70,7 @@ else:
             self.ai_fix = SimpleSignal()
             self.ai_explain = SimpleSignal()
             self.ai_rom = SimpleSignal()
-                self._current_file = None
+            self._current_file = None
 
         def list_files(self, limit: int = 100) -> List[str]:
             out = []
