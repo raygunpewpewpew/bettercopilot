@@ -1,0 +1,9 @@
+[project]
+name = "bettercopilot"
+version = "0.1.0"
+description = "Modular, model-agnostic, tool-driven AI IDE"
+requires-python = ">=3.8"
+dependencies = ["requests>=2.25", "pytest>=6.0"]
+
+[project.scripts]
+ai = "bettercopilot.ui.cli.main:main"

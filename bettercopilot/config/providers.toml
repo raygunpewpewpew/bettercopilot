@@ -1,0 +1,13 @@
+[groq]
+api_key = ""
+base_url = ""
+model = "" 
+temperature = 0.0
+max_retries = 3
+
+[gemini]
+api_key = ""
+base_url = ""
+model = ""
+temperature = 0.0
+max_retries = 3
