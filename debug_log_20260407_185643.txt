@@ -1,0 +1,6 @@
+{"ts": 1775598636.3406723, "event": "assistant_append", "text": "Hi there! How can I assist you today?"}
+{"ts": 1775599059.0014198, "event": "assistant_append", "text": "Hi there! How can I assist you today?"}
+{"ts": 1775599079.4839082, "event": "assistant_append", "text": "Sorry to hear that! Could you provide more details about the program and what issues you’re experiencing? This will help me assist you better."}
+{"ts": 1775599298.9682846, "event": "assistant_append", "text": "Hi there! How can I assist you today?", "provider": "OpenRouter"}
+{"ts": 1775599321.4421132, "event": "assistant_append", "text": "Of course! Please share the code you're having trouble with, and let me know what issues you're encountering.", "provider": "OpenRouter"}
+{"ts": 1775600638.974656, "event": "assistant_append", "text": "How can I assist you today?", "provider": "OpenRouter"}

@@ -36,6 +36,15 @@ class HeadlessMainWindow:
         self.file_tree = FileTreePanel()
         self.editor = EditorPanel()
         self.ai_panel = AIPanel()
+        try:
+            self.ai_panel.set_provider_label('OpenRouter')
+        except Exception:
+            pass
+        self.ai_panel_ollama = AIPanel()
+        try:
+            self.ai_panel_ollama.set_provider_label('Ollama')
+        except Exception:
+            pass
         self.diff_viewer = DiffViewer()
         self.status_bar = StatusBar()
 
@@ -56,19 +65,56 @@ if PYSIDE:
             self.file_tree = FileTreePanel()
             self.editor = EditorPanel()
             self.ai_panel = AIPanel()
+            try:
+                self.ai_panel.set_provider_label('OpenRouter')
+            except Exception:
+                pass
+            self.ai_panel_ollama = AIPanel()
+            try:
+                self.ai_panel_ollama.set_provider_label('Ollama')
+            except Exception:
+                pass
             self.diff_viewer = DiffViewer()
             self.status_bar = StatusBar()
 
             # Add panels to the main splitter so each is resizable by the user.
             self.splitter.addWidget(self.file_tree)
             self.splitter.addWidget(self.editor)
-            self.splitter.addWidget(self.ai_panel)
+            # Group the two AI panels into a right-hand container so they
+            # remain side-by-side and are restored together by the main splitter.
+            try:
+                self.ai_container = QSplitter()
+                try:
+                    self.ai_container.setOrientation(Qt.Horizontal)
+                except Exception:
+                    pass
+                self.ai_container.addWidget(self.ai_panel)
+                self.ai_container.addWidget(self.ai_panel_ollama)
+                self.splitter.addWidget(self.ai_container)
+            except Exception:
+                # fallback: add panels individually
+                try:
+                    self.splitter.addWidget(self.ai_panel)
+                except Exception:
+                    pass
+                try:
+                    self.splitter.addWidget(self.ai_panel_ollama)
+                except Exception:
+                    pass
 
             # Prefer the editor to take most space by default while still
             # allowing the file tree and AI panel to be resized by the user.
-            self.splitter.setStretchFactor(0, 1)
-            self.splitter.setStretchFactor(1, 4)
-            self.splitter.setStretchFactor(2, 1)
+            # Set stretch factors for file_tree, editor and AI container
+            try:
+                self.splitter.setStretchFactor(0, 1)
+                self.splitter.setStretchFactor(1, 4)
+                # AI container is at index 2 when present
+                try:
+                    self.splitter.setStretchFactor(2, 1)
+                except Exception:
+                    pass
+            except Exception:
+                pass
 
             # Place the splitter in a vertical container so we can reserve
             # ~10% of the central area as margins and give the splitter
@@ -106,8 +152,21 @@ if PYSIDE:
                 # Restore splitter sizes if present, otherwise compute sensible defaults
                 try:
                     sizes = settings.value('mainWindow/splitterSizes')
-                    if sizes and isinstance(sizes, (list, tuple)):
-                        self.splitter.setSizes([int(x) for x in sizes])
+                    # Ensure saved sizes match current splitter widget count; otherwise compute defaults
+                    try:
+                        count = self.splitter.count()
+                    except Exception:
+                        count = 4
+
+                    if sizes and isinstance(sizes, (list, tuple)) and len(sizes) == count:
+                        try:
+                            ints = [int(x) for x in sizes]
+                            # Reject obviously-invalid saved sizes (zero or negative)
+                            if any(i <= 0 for i in ints) or sum(ints) < 50:
+                                raise ValueError('invalid saved splitter sizes')
+                            self.splitter.setSizes(ints)
+                        except Exception:
+                            pass
                     else:
                         # Try to compute defaults from primary screen width
                         try:
@@ -116,16 +175,41 @@ if PYSIDE:
                                 w = screen.availableGeometry().width()
                             else:
                                 w = 1200
-                            self.splitter.setSizes([int(w * 0.10), int(w * 0.70), int(w * 0.20)])
+                            # allocate columns: file_tree, editor, ai_panel, ai_panel_ollama
+                            if count == 4:
+                                self.splitter.setSizes([int(w * 0.10), int(w * 0.60), int(w * 0.15), int(w * 0.15)])
+                            elif count == 3:
+                                self.splitter.setSizes([int(w * 0.10), int(w * 0.70), int(w * 0.20)])
+                            else:
+                                # distribute reasonably for other counts
+                                base = [int(w * 0.10), int(w * 0.70)]
+                                extras = [int(w * 0.10)] * max(0, count - 2)
+                                self.splitter.setSizes(base + extras)
                         except Exception:
                             # fallback to small ratio values
                             try:
-                                self.splitter.setSizes([100, 800, 200])
+                                if count == 4:
+                                    self.splitter.setSizes([100, 650, 150, 150])
+                                elif count == 3:
+                                    self.splitter.setSizes([100, 800, 200])
+                                else:
+                                    self.splitter.setSizes([100, 800] + [150] * max(0, count - 2))
                             except Exception:
                                 pass
                 except Exception:
                     try:
-                        self.splitter.setSizes([100, 800, 200])
+                        # Fallback: ensure the sizes list matches the number of widgets
+                        n = self.splitter.count()
+                        if n == 4:
+                            self.splitter.setSizes([100, 800, 150, 150])
+                        elif n == 3:
+                            self.splitter.setSizes([100, 800, 200])
+                        elif n > 0:
+                            # distribute evenly with a larger editor column
+                            sizes = [100] + [600] + [150] * (n - 2)
+                            self.splitter.setSizes(sizes)
+                        else:
+                            self.splitter.setSizes([100, 800, 150, 150])
                     except Exception:
                         pass
 
@@ -166,6 +250,32 @@ if PYSIDE:
                         pass
             except Exception:
                 # Do not let settings failures break startup
+                pass
+
+            # Ensure no splitter child is collapsed after restoring state/sizes; if so, set reasonable defaults
+            try:
+                try:
+                    current_sizes = self.splitter.sizes()
+                except Exception:
+                    current_sizes = None
+                if current_sizes and isinstance(current_sizes, (list, tuple)) and len(current_sizes) == self.splitter.count():
+                    # if any of the last two columns are tiny (collapsed), reset to defaults
+                    try:
+                        tail = current_sizes[-2:]
+                    except Exception:
+                        tail = current_sizes
+                    if any((s is None or int(s) <= 8) for s in tail):
+                        try:
+                            n = self.splitter.count()
+                            if n == 4:
+                                self.splitter.setSizes([150, 800, 150, 150])
+                            elif n == 3:
+                                self.splitter.setSizes([150, 800, 150])
+                            else:
+                                self.splitter.setSizes([150, 800] + [150] * max(0, n - 2))
+                        except Exception:
+                            pass
+            except Exception:
                 pass
 
         def wiring(self, api):
@@ -268,8 +378,22 @@ if PYSIDE:
 
             # connect signals to API
             self.file_tree.file_selected.connect(lambda p: api.open_file(p))
-            self.ai_panel.ask.connect(lambda text: api.run_ask(text))
-            self.ai_panel.fix_current_file.connect(lambda: api.run_fix(self.file_tree.current_file()))
+            # Primary AI panel -> OpenRouter
+            try:
+                self.ai_panel.ask.connect(lambda text: api.run_ask(text, provider_override='openrouter', response_panel=self.ai_panel))
+            except Exception:
+                try:
+                    self.ai_panel.ask.connect(lambda text: api.run_ask(text))
+                except Exception:
+                    pass
+            # Secondary AI panel -> Ollama
+            try:
+                self.ai_panel_ollama.ask.connect(lambda text: api.run_ask(text, provider_override='ollama', response_panel=self.ai_panel_ollama))
+            except Exception:
+                try:
+                    self.ai_panel_ollama.ask.connect(lambda text: api.run_ask(text))
+                except Exception:
+                    pass
             self.diff_viewer.apply_patch.connect(lambda patch: api.apply_patch(patch))
 
         def show(self):
@@ -369,7 +493,30 @@ if PYSIDE:
                 pass
             # Apply default sizes and ensure diff dock is visible
             try:
-                self.splitter.setSizes([150, 800, 150])
+                try:
+                    n = self.splitter.count()
+                except Exception:
+                    n = 4
+
+                # Provide sensible defaults depending on number of panels.
+                if n == 4:
+                    sizes = [150, 800, 150, 150]
+                elif n == 3:
+                    sizes = [150, 800, 150]
+                elif n <= 0:
+                    sizes = [150, 800, 150, 150]
+                else:
+                    # first column small, editor large, remaining equal small columns
+                    sizes = [150, 800] + [150] * max(0, n - 2)
+
+                try:
+                    self.splitter.setSizes(sizes)
+                except Exception:
+                    # best-effort fallback to a conservative layout
+                    try:
+                        self.splitter.setSizes([150, 800, 150, 150])
+                    except Exception:
+                        pass
             except Exception:
                 pass
             try:

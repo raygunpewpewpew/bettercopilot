@@ -1,0 +1,2 @@
+{"run_id": "1775600588275", "event": "init", "ts": 1775600588.2750962, "metadata": {"task_id": "71c52d56-826f-42cc-9acb-6bad7684e1fa", "goal": "ollama", "provider": "ollama"}}
+{"run_id": "1775600588275", "event": {"level": "info", "type": "task_start", "task": "71c52d56-826f-42cc-9acb-6bad7684e1fa"}, "ts": 1775600588.2799833}

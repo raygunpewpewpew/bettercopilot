@@ -1,0 +1,5 @@
+{"ts": 1775607458.9804802, "event": "session_start", "session_id": "955e0595-c0bc-4da2-85e9-7c21ed8bcf8d", "pid": 28964, "argv": [".\\scripts\\run_gui_launcher.py"]}
+{"ts": 1775607474.267471, "event": "ollama_post_attempt", "url": "http://localhost:11434/api/chat", "attempt": 1, "payload_preview": "{'model': 'qwen2.5-coder:1.5b-base', 'messages': [{'role': 'system', 'content': 'Providers: openrouter, ollama'}, {'role': 'system', 'content': 'Providers: openrouter, ollama'}, {'role': 'user', 'cont"}
+{"ts": 1775607474.4744434, "event": "ollama_post_response", "url": "http://localhost:11434/api/chat", "status": 200}
+{"ts": 1775607570.9452085, "event": "ollama_post_success", "url": "http://localhost:11434/api/chat", "status": 200}
+{"ts": 1775607570.9583118, "event": "provider_raw", "provider": "ollama", "raw": {"text": "", "tool_calls": [], "raw": {"text": ""}}}

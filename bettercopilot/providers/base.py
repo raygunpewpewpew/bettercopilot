@@ -21,8 +21,12 @@ class Provider(ABC):
         self.logger = logger or logging.getLogger(self.name)
 
     @abstractmethod
-    def generate(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict]] = None, system: Optional[str] = None) -> Dict[str, Any]:
+    def generate(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict]] = None, system: Optional[str] = None, progress_callback: Optional[callable] = None) -> Dict[str, Any]:
         """Generate a response.
+
+        Providers may optionally emit incremental progress by calling the
+        provided `progress_callback(event, data)` with event `'provider_stream'`
+        and data containing at least `partial` (text) and `provider`.
 
         Returns a dict with keys such as `text`, `tool_call`, and `raw`.
         """

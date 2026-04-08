@@ -38,7 +38,7 @@ class OpenRouterProvider(Provider):
             'Content-Type': 'application/json',
         })
 
-    def generate(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict]] = None, system: Optional[str] = None) -> Dict[str, Any]:
+    def generate(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict]] = None, system: Optional[str] = None, progress_callback: Optional[callable] = None) -> Dict[str, Any]:
         """Call OpenRouter chat completions and return a normalized dict.
 
         Returns a dict containing at least `text` and `raw` fields and
@@ -80,6 +80,34 @@ class OpenRouterProvider(Provider):
                             text = out
                         elif isinstance(out, dict):
                             text = out.get('text') or ''
+
+                # Emit a provider_stream event with incremental partials if requested.
+                try:
+                    if callable(progress_callback) and isinstance(text, str) and text:
+                        # Chunk the final text into a few parts for a smooth UI stream
+                        words = text.split()
+                        total_parts = min(6, max(1, len(words) // 40 + 1))
+                        part_size = max(1, len(words) // total_parts)
+                        assembled = ''
+                        parts = []
+                        for i in range(0, len(words), part_size):
+                            parts.append(' '.join(words[i:i+part_size]))
+                        total = len(parts) if parts else 1
+                        for idx, part in enumerate(parts):
+                            if assembled:
+                                assembled += ' ' + part
+                            else:
+                                assembled = part
+                            try:
+                                progress_callback('provider_stream', {'provider': self.name, 'partial': assembled, 'index': idx, 'total': total})
+                            except Exception:
+                                pass
+                            try:
+                                time.sleep(0.02)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
 
                 return {'text': text, 'tool_calls': data.get('tool_calls') or [], 'raw': data}
 

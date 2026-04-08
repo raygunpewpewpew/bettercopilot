@@ -131,7 +131,9 @@ class Orchestrator:
                 except Exception:
                     pass
 
-                out = gen.generate(messages, tools=task.tools)
+                # Allow providers to emit progress events back to the
+                # orchestrator by passing the _emit_progress callback.
+                out = gen.generate(messages, tools=task.tools, progress_callback=self._emit_progress)
                 last_out = out
 
                 # provider call finished
@@ -146,7 +148,7 @@ class Orchestrator:
 
             except Exception as e:
                 try:
-                    self._emit_progress('provider_error', {'attempt': attempt, 'error': str(e)})
+                    self._emit_progress('provider_error', {'provider': provider_name, 'attempt': attempt, 'error': str(e)})
                 except Exception:
                     pass
                 self.logger.exception("Provider generate failed: %s", e)
@@ -213,7 +215,7 @@ class Orchestrator:
                 logs.append({"attempt": attempt, "result": "accepted"})
                 log_event(run_id, {"level": "info", "type": "accepted", "attempt": attempt})
                 try:
-                    self._emit_progress('responding', {'final_output': final_output})
+                    self._emit_progress('responding', {'provider': provider_name, 'final_output': final_output})
                 except Exception:
                     pass
                 break
@@ -229,7 +231,7 @@ class Orchestrator:
                 diffs.append(Context.compute_diffs(out.get('text', ''), final_output))
                 log_event(run_id, {"level": "info", "type": "fixed_output", "attempt": attempt})
                 try:
-                    self._emit_progress('responding', {'final_output': final_output})
+                    self._emit_progress('responding', {'provider': provider_name, 'final_output': final_output})
                 except Exception:
                     pass
                 break
@@ -254,14 +256,14 @@ class Orchestrator:
                 if candidate:
                     result['final_text'] = candidate
                     try:
-                        self._emit_progress('responding', {'final_output': result['final_text']})
+                        self._emit_progress('responding', {'provider': provider_name, 'final_output': result['final_text']})
                     except Exception:
                         pass
             except Exception:
                 pass
         write_summary(run_id, result)
         try:
-            self._emit_progress('done', {'task_id': task.id})
+            self._emit_progress('done', {'provider': provider_name, 'task_id': task.id})
         except Exception:
             pass
         return result

@@ -32,12 +32,18 @@ class SimpleSignal:
 if PYSIDE:
     class AIPanel(QWidget):
         ask = Signal(str)
-        fix_current_file = Signal()
         run_task = Signal(dict)
 
         def __init__(self, parent=None):
             super().__init__(parent)
             self.layout = QVBoxLayout()
+            # Title label to indicate provider / panel purpose
+            self.title_label = QLabel('AI')
+            try:
+                self.title_label.setStyleSheet('font-weight: bold;')
+            except Exception:
+                pass
+            self.layout.addWidget(self.title_label)
             self.history = QTextEdit()
             self.history.setReadOnly(True)
             self.input = QLineEdit()
@@ -45,11 +51,9 @@ if PYSIDE:
             self.status_label = QLabel('')
             self.btn_row = QHBoxLayout()
             self.btn_ask = QPushButton('Ask')
-            self.btn_fix = QPushButton('Fix File')
             self.btn_run = QPushButton('Run Task')
             self.btn_clear = QPushButton('Clear')
             self.btn_row.addWidget(self.btn_ask)
-            self.btn_row.addWidget(self.btn_fix)
             self.btn_row.addWidget(self.btn_run)
             # Debug toggle button (shows/hides expanded debug log)
             self.btn_debug = QPushButton('Show Debug')
@@ -73,13 +77,26 @@ if PYSIDE:
             self.layout.addLayout(self.btn_row)
             self.setLayout(self.layout)
 
+        def set_provider_label(self, provider_name: Optional[str]):
+            try:
+                if provider_name:
+                    self.title_label.setText(f"AI — {provider_name}")
+                else:
+                    self.title_label.setText('AI')
+            except Exception:
+                pass
+            try:
+                self.provider_name = provider_name
+            except Exception:
+                pass
+
             self.btn_ask.clicked.connect(self._on_ask)
             # Allow pressing Enter in the input to send the message
             try:
                 self.input.returnPressed.connect(self._on_ask)
             except Exception:
                 pass
-            self.btn_fix.clicked.connect(lambda: self.fix_current_file.emit())
+            # (Fix File button removed)
             self.btn_run.clicked.connect(lambda: self.run_task.emit({}))
             self.btn_clear.clicked.connect(self.clear)
             self.btn_debug.toggled.connect(self._toggle_debug)
@@ -142,6 +159,12 @@ if PYSIDE:
                     try:
                         import json, time
                         dbg = {'ts': time.time(), 'event': 'assistant_append', 'text': text}
+                        # include provider label when available so panels can filter
+                        try:
+                            if getattr(self, 'provider_name', None):
+                                dbg['provider'] = getattr(self, 'provider_name')
+                        except Exception:
+                            pass
                         s = json.dumps(dbg, ensure_ascii=False)
                         try:
                             self._write_debug_line(s)
@@ -151,6 +174,57 @@ if PYSIDE:
                         pass
             except Exception:
                 pass
+
+        def update_last_message(self, role: str, text: str):
+            """Replace the last message with `role` if present, otherwise append."""
+            try:
+                full = self.history.toPlainText()
+                lines = full.splitlines()
+                marker = f"[{role}]"
+                idx = None
+                for i in range(len(lines) - 1, -1, -1):
+                    if lines[i].startswith(marker):
+                        idx = i
+                        break
+                if idx is None:
+                    # nothing to replace — append instead
+                    return self.append_message(role, text)
+                # replace from idx onwards with a single role line
+                new_lines = lines[:idx] + [f"{marker} {text}"]
+                new_text = "\n".join(new_lines)
+                try:
+                    self.history.setPlainText(new_text)
+                except Exception:
+                    try:
+                        # fallback: clear + append
+                        self.history.clear()
+                        self.history.append(new_text)
+                    except Exception:
+                        pass
+                try:
+                    from PySide6.QtGui import QTextCursor
+                    self.history.moveCursor(QTextCursor.End)
+                    self.history.ensureCursorVisible()
+                    try:
+                        # Force a repaint so streaming updates show immediately
+                        try:
+                            self.history.repaint()
+                        except Exception:
+                            pass
+                        try:
+                            # Process pending Qt events to flush the UI update
+                            QCoreApplication.processEvents()
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+            except Exception:
+                try:
+                    self.append_message(role, text)
+                except Exception:
+                    pass
 
         def _toggle_debug(self, checked: bool):
             try:
@@ -183,6 +257,13 @@ if PYSIDE:
                                         ln = line.rstrip('\n')
                                         try:
                                             obj = json.loads(ln)
+                                            # If this panel has a provider label, only show
+                                            # debug lines that match the provider or are global
+                                            prov = obj.get('provider') if isinstance(obj, dict) else None
+                                            label = getattr(self, 'provider_name', None)
+                                            if label and prov and prov != label:
+                                                # skip entries for other providers
+                                                continue
                                             pretty = json.dumps(obj, ensure_ascii=False, indent=2)
                                             self.debug_log.append(pretty)
                                             self.debug_log.append('')
@@ -223,9 +304,24 @@ if PYSIDE:
                     pretty = s
                     try:
                         obj = json.loads(s)
+                        # ensure provider metadata is present when panel has a label
+                        try:
+                            if getattr(self, 'provider_name', None) and not obj.get('provider'):
+                                obj['provider'] = getattr(self, 'provider_name')
+                        except Exception:
+                            pass
                         pretty = json.dumps(obj, ensure_ascii=False, indent=2)
+                        s = json.dumps(obj, ensure_ascii=False)
                     except Exception:
-                        pretty = s
+                        # not JSON: wrap into a JSON object so disk entries include provider
+                        try:
+                            obj = {'ts': time.time(), 'event': 'debug_line', 'text': s}
+                            if getattr(self, 'provider_name', None):
+                                obj['provider'] = getattr(self, 'provider_name')
+                            pretty = json.dumps(obj, ensure_ascii=False, indent=2)
+                            s = json.dumps(obj, ensure_ascii=False)
+                        except Exception:
+                            pretty = s
 
                     try:
                         self.debug_log.append(pretty)
@@ -233,7 +329,7 @@ if PYSIDE:
                     except Exception:
                         pass
 
-                    # Append compact original to disk with rotation
+                    # Append compact original to disk with rotation (ensure provider present)
                     try:
                         written = self._write_debug_line(s)
                         return bool(written)
@@ -387,6 +483,11 @@ if PYSIDE:
                                 ln = line.rstrip('\n')
                                 try:
                                     obj = json.loads(ln)
+                                    # filter by provider label when present
+                                    prov = obj.get('provider') if isinstance(obj, dict) else None
+                                    label = getattr(self, 'provider_name', None)
+                                    if label and prov and prov != label:
+                                        continue
                                     pretty = json.dumps(obj, ensure_ascii=False, indent=2)
                                     self.debug_log.append(pretty)
                                     self.debug_log.append('')
@@ -452,15 +553,37 @@ if PYSIDE:
         def clear(self):
             self.history.clear()
 
+        def get_history(self) -> List[Dict]:
+            try:
+                text = self.history.toPlainText()
+                lines = text.splitlines()
+                out = []
+                for ln in lines:
+                    if not ln:
+                        continue
+                    if ln.startswith('[') and ']' in ln:
+                        try:
+                            idx = ln.find(']')
+                            role = ln[1:idx].strip()
+                            msg = ln[idx+2:] if len(ln) > idx + 2 else ''
+                            out.append({'role': role, 'text': msg})
+                        except Exception:
+                            out.append({'role': 'assistant', 'text': ln})
+                    else:
+                        out.append({'role': 'assistant', 'text': ln})
+                return out
+            except Exception:
+                return []
+
 else:
     class AIPanel:
         def __init__(self):
             self.ask = SimpleSignal()
-            self.fix_current_file = SimpleSignal()
             self.run_task = SimpleSignal()
             self._history = []
             self._debug = []
             self._status = ''
+            self.provider_name = None
 
         def append_message(self, role: str, text: str):
             try:
@@ -477,7 +600,13 @@ else:
                 if role == 'assistant':
                     try:
                         import json, time
-                        s = json.dumps({'ts': time.time(), 'event': 'assistant_append', 'text': text}, ensure_ascii=False)
+                        obj = {'ts': time.time(), 'event': 'assistant_append', 'text': text}
+                        try:
+                            if getattr(self, 'provider_name', None):
+                                obj['provider'] = getattr(self, 'provider_name')
+                        except Exception:
+                            pass
+                        s = json.dumps(obj, ensure_ascii=False)
                         # write to debug_log.txt using same candidate locations as append_debug
                         candidates = [Path.cwd()]
                         try:
@@ -499,9 +628,26 @@ else:
                         pass
             except Exception:
                 pass
+        def update_last_message(self, role: str, text: str):
+            try:
+                if len(getattr(self, '_history', [])) > 0 and self._history[-1].get('role') == role:
+                    self._history[-1]['text'] = text
+                else:
+                    self._history.append({'role': role, 'text': text})
+            except Exception:
+                try:
+                    self._history.append({'role': role, 'text': str(text)})
+                except Exception:
+                    pass
 
         def get_history(self) -> List[Dict]:
             return list(self._history)
+
+        def set_provider_label(self, provider_name: Optional[str]):
+            try:
+                self.provider_name = provider_name
+            except Exception:
+                pass
 
         def clear(self):
             self._history.clear()
@@ -512,6 +658,12 @@ else:
                 pretty = s
                 try:
                     obj = json.loads(s)
+                    # ensure provider metadata when available
+                    try:
+                        if getattr(self, 'provider_name', None) and not obj.get('provider'):
+                            obj['provider'] = getattr(self, 'provider_name')
+                    except Exception:
+                        pass
                     pretty = json.dumps(obj, ensure_ascii=False, indent=2)
                 except Exception:
                     pretty = s
@@ -555,8 +707,20 @@ else:
                     written = False
                     try:
                         logfile.parent.mkdir(parents=True, exist_ok=True)
+                        # If original text wasn't JSON, wrap and include provider
+                        try:
+                            json.loads(s)
+                            write_s = s
+                        except Exception:
+                            try:
+                                wrap = {'ts': time.time(), 'event': 'debug_line', 'text': s}
+                                if getattr(self, 'provider_name', None):
+                                    wrap['provider'] = getattr(self, 'provider_name')
+                                write_s = json.dumps(wrap, ensure_ascii=False)
+                            except Exception:
+                                write_s = s
                         with open(logfile, 'a', encoding='utf-8') as f:
-                            f.write(s + "\n")
+                                f.write(write_s + "\n")
                         written = True
                     except Exception:
                         written = False

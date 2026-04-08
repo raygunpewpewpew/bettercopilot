@@ -41,14 +41,29 @@ def _make_orchestrator(progress_callback=None):
     except Exception:
         pass
 
-    # Add Ollama HTTP provider only if an explicit OLLAMA_URL/OLLAMA_HOST is configured
+    # Prefer an HTTP-backed Ollama provider when available. If the
+    # environment explicitly sets OLLAMA_URL/OLLAMA_HOST, use that. Otherwise
+    # perform a lightweight probe of the default local endpoint and prefer
+    # the HTTP provider if the server is reachable.
     try:
-        ollama_url = os.getenv('OLLAMA_URL') or os.getenv('OLLAMA_HOST')
-        if ollama_url and OllamaHTTPProvider is not None:
-            try:
-                providers['ollama'] = OllamaHTTPProvider(api_url=ollama_url)
-            except Exception:
-                pass
+        if OllamaHTTPProvider is not None:
+            ollama_url = os.getenv('OLLAMA_URL') or os.getenv('OLLAMA_HOST')
+            if ollama_url:
+                try:
+                    providers['ollama'] = OllamaHTTPProvider(api_url=ollama_url)
+                except Exception:
+                    pass
+            else:
+                try:
+                    # Try default local Ollama and probe availability quickly
+                    candidate = OllamaHTTPProvider()
+                    try:
+                        if candidate.is_available(timeout=0.8):
+                            providers['ollama'] = candidate
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
     except Exception:
         pass
 
@@ -113,6 +128,121 @@ def run_task(task: Task, callback=None, error_callback=None) -> Worker:
         try:
             if callback:
                 callback(res)
+        except Exception:
+            pass
+
+        # Probe Ollama provider to display the currently-used model in the Ollama panel.
+        try:
+            if getattr(self, 'orchestrator', None) and getattr(self.orchestrator, 'providers', None) and self.ai_panel_ollama:
+                provs = self.orchestrator.providers
+                if 'ollama' in provs:
+                    provider = provs.get('ollama')
+                    # Run a non-blocking probe that asks the provider to identify itself.
+                    def _probe_model():
+                        try:
+                            hist_panel = self.ai_panel_ollama
+                            def _progress_wrapper(event, d=None):
+                                try:
+                                    dd = dict(d) if isinstance(d, dict) else {'_raw': d}
+                                except Exception:
+                                    dd = {'_raw': d}
+                                try:
+                                    dd['_response_panel'] = hist_panel
+                                except Exception:
+                                    pass
+                                try:
+                                    self._handle_progress(event, dd)
+                                except Exception:
+                                    pass
+
+                            # Ask the provider to state its model id/version succinctly.
+                            messages = [{'role': 'user', 'content': 'Please state your model identifier and version in one short line (model id only).'}]
+                            out = provider.generate(messages, progress_callback=_progress_wrapper)
+                            text = ''
+                            try:
+                                if isinstance(out, dict):
+                                    text = out.get('text') or (out.get('raw') or {}).get('output') or ''
+                                else:
+                                    text = str(out)
+                            except Exception:
+                                text = str(out)
+
+                            if text:
+                                try:
+                                    hist_panel.append_message('status', f'Ollama model: {text.strip()}')
+                                except Exception:
+                                    pass
+                            else:
+                                # Fallback to provider.model attribute if available
+                                try:
+                                    m = getattr(provider, 'model', None)
+                                    if m:
+                                        hist_panel.append_message('status', f'Ollama model: {m}')
+                                except Exception:
+                                    pass
+
+                            # Write probe result to debug log
+                            try:
+                                dbg = {'ts': time.time(), 'event': 'ollama_model_probe', 'text_preview': (text or '')[:200], 'provider_model_attr': getattr(provider, 'model', None)}
+                                s = json.dumps(dbg, ensure_ascii=False)
+                                written = False
+                                try:
+                                    if hasattr(hist_panel, 'append_debug'):
+                                        try:
+                                            hist_panel.append_debug(s)
+                                            written = True
+                                        except Exception:
+                                            written = False
+                                except Exception:
+                                    written = False
+                                if not written:
+                                    try:
+                                        _write_debug_line(s)
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+                        except Exception as e:
+                            try:
+                                self.ai_panel_ollama.append_message('status', f'Model probe error: {e}')
+                            except Exception:
+                                pass
+                            try:
+                                dbg = {'ts': time.time(), 'event': 'ollama_model_probe_error', 'error': str(e)}
+                                s = json.dumps(dbg, ensure_ascii=False)
+                                written = False
+                                try:
+                                    if hasattr(self.ai_panel_ollama, 'append_debug'):
+                                        try:
+                                            self.ai_panel_ollama.append_debug(s)
+                                            written = True
+                                        except Exception:
+                                            written = False
+                                except Exception:
+                                    written = False
+                                if not written:
+                                    try:
+                                        _write_debug_line(s)
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+
+                    try:
+                        worker = Worker(_probe_model)
+                        try:
+                            worker.start()
+                        except Exception:
+                            # best-effort: run directly if Worker cannot be started
+                            try:
+                                _probe_model()
+                            except Exception:
+                                pass
+                    except Exception:
+                        try:
+                            _probe_model()
+                        except Exception:
+                            pass
         except Exception:
             pass
 
@@ -233,6 +363,7 @@ class GUIAPI:
         self.editor = getattr(frontend, 'editor', None)
         self.file_tree = getattr(frontend, 'file_tree', None)
         self.ai_panel = getattr(frontend, 'ai_panel', None)
+        self.ai_panel_ollama = getattr(frontend, 'ai_panel_ollama', None)
         self.diff_viewer = getattr(frontend, 'diff_viewer', None)
         self.status_bar = getattr(frontend, 'status_bar', None)
         # Report which providers were loaded so the user can verify configuration
@@ -240,9 +371,19 @@ class GUIAPI:
             provs = []
             if hasattr(self, 'orchestrator') and getattr(self.orchestrator, 'providers', None):
                 provs = list(self.orchestrator.providers.keys())
-            if self.ai_panel and provs:
+            if provs:
                 try:
-                    self.ai_panel.append_message('status', f"Providers: {', '.join(provs)}")
+                    msg = f"Providers: {', '.join(provs)}"
+                    if self.ai_panel:
+                        try:
+                            self.ai_panel.append_message('status', msg)
+                        except Exception:
+                            pass
+                    if self.ai_panel_ollama:
+                        try:
+                            self.ai_panel_ollama.append_message('status', msg)
+                        except Exception:
+                            pass
                 except Exception:
                     pass
         except Exception:
@@ -273,7 +414,7 @@ class GUIAPI:
                 if self.status_bar:
                     self.status_bar.set_message(f'Failed to open {path}')
 
-    def _on_task_finished(self, result: Dict[str, Any], origin: str = 'task'):
+    def _on_task_finished(self, result: Dict[str, Any], origin: str = 'task', panel=None):
         # Update UI panels with result
         if not isinstance(result, dict):
             return
@@ -342,19 +483,20 @@ class GUIAPI:
         diffs = result.get('diffs') or []
         logs = result.get('logs') or []
 
-        if self.ai_panel and final:
+        target_panel = panel or self.ai_panel
+        if target_panel and final:
             # Ensure UI updates are resilient; schedule via Qt event loop if needed
             try:
-                self.ai_panel.append_message('assistant', final)
+                target_panel.append_message('assistant', final)
                 try:
-                    print(f"[GUIAPI] appended assistant message to ai_panel (len={len(final)})")
+                    print(f"[GUIAPI] appended assistant message to panel (len={len(final)})")
                 except Exception:
                     pass
             except Exception:
                 try:
                     # best-effort: call via QTimer if available
                     from PySide6.QtCore import QTimer
-                    QTimer.singleShot(0, lambda: self.ai_panel.append_message('assistant', final))
+                    QTimer.singleShot(0, lambda: target_panel.append_message('assistant', final))
                 except Exception:
                     pass
 
@@ -408,6 +550,20 @@ class GUIAPI:
         }
         status = mapping.get(event, str(event))
 
+        def _choose_panel(d: Optional[Dict[str, Any]]):
+            try:
+                if isinstance(d, dict):
+                    # If the caller supplied an explicit response panel (direct chat), prefer it
+                    panel = d.get('_response_panel') or d.get('response_panel')
+                    if panel:
+                        return panel
+                    prov = d.get('provider') or d.get('provider_name')
+                    if prov == 'ollama' and getattr(self, 'ai_panel_ollama', None):
+                        return self.ai_panel_ollama
+            except Exception:
+                pass
+            return getattr(self, 'ai_panel', None)
+
         def _ui_update():
             # Update status bar / status label
             try:
@@ -417,26 +573,27 @@ class GUIAPI:
 
             # Append helpful debug messages to AI panel history when available
             try:
-                if self.ai_panel and hasattr(self.ai_panel, 'append_message'):
+                target = _choose_panel(data)
+                if target and hasattr(target, 'append_message'):
                     if event == 'provider_call_start':
-                        self.ai_panel.append_message('status', 'Thinking...')
+                        target.append_message('status', 'Thinking...')
                     elif event == 'provider_call_end':
                         preview = None
                         if isinstance(data, dict):
                             preview = data.get('preview') or data.get('output_preview') or data.get('preview_text')
                         if preview:
-                            self.ai_panel.append_message('status', f'Provider preview: {preview}')
+                            target.append_message('status', f'Provider preview: {preview}')
                         else:
-                            self.ai_panel.append_message('status', status)
+                            target.append_message('status', status)
                         # Append verbose debug JSON; prefer AI panel writer to avoid duplicate writes
                         try:
                             dbg = {'ts': time.time(), 'event': event, 'preview': preview, 'data': data}
                             s = json.dumps(dbg, ensure_ascii=False)
                             written = False
                             try:
-                                if hasattr(self.ai_panel, 'append_debug'):
+                                if hasattr(target, 'append_debug'):
                                     try:
-                                        written = bool(self.ai_panel.append_debug(s))
+                                        written = bool(target.append_debug(s))
                                     except Exception:
                                         written = False
                             except Exception:
@@ -453,15 +610,15 @@ class GUIAPI:
                         if isinstance(data, dict):
                             final = data.get('final_output')
                         if final:
-                            self.ai_panel.append_message('assistant', final)
+                            target.append_message('assistant', final)
                             try:
                                 dbg = {'ts': time.time(), 'event': event, 'final_output': final}
                                 s = json.dumps(dbg, ensure_ascii=False)
                                 written = False
                                 try:
-                                    if hasattr(self.ai_panel, 'append_debug'):
+                                    if hasattr(target, 'append_debug'):
                                         try:
-                                            written = bool(self.ai_panel.append_debug(s))
+                                            written = bool(target.append_debug(s))
                                         except Exception:
                                             written = False
                                 except Exception:
@@ -474,18 +631,18 @@ class GUIAPI:
                             except Exception:
                                 pass
                         else:
-                            self.ai_panel.append_message('status', status)
+                            target.append_message('status', status)
                     elif event == 'provider_error':
                         err = data.get('error') if isinstance(data, dict) else str(data)
-                        self.ai_panel.append_message('status', f'Provider error: {err}')
+                        target.append_message('status', f'Provider error: {err}')
                         try:
                             dbg = {'ts': time.time(), 'event': event, 'error': err, 'data': data}
                             s = json.dumps(dbg, ensure_ascii=False)
                             written = False
                             try:
-                                if hasattr(self.ai_panel, 'append_debug'):
+                                if hasattr(target, 'append_debug'):
                                     try:
-                                        written = bool(self.ai_panel.append_debug(s))
+                                        written = bool(target.append_debug(s))
                                     except Exception:
                                         written = False
                             except Exception:
@@ -497,16 +654,46 @@ class GUIAPI:
                                     pass
                         except Exception:
                             pass
+                    elif event == 'provider_stream':
+                        # Streaming partials from a provider (e.g. Ollama)
+                        partial = None
+                        if isinstance(data, dict):
+                            partial = data.get('partial') or data.get('preview') or data.get('final_output')
+                        if partial:
+                            try:
+                                # Update last assistant message if present, otherwise append
+                                if hasattr(target, 'update_last_message'):
+                                    target.update_last_message('assistant', partial)
+                                else:
+                                    target.append_message('assistant', partial)
+                                # Update streaming status label when available
+                                try:
+                                    if isinstance(data, dict) and hasattr(target, 'set_status'):
+                                        idx = data.get('index')
+                                        total = data.get('total')
+                                        if idx is not None and total:
+                                            target.set_status(f"Streaming ({idx+1}/{total})")
+                                        else:
+                                            target.set_status('Streaming...')
+                                except Exception:
+                                    pass
+                            except Exception:
+                                try:
+                                    target.append_message('assistant', partial)
+                                except Exception:
+                                    pass
+                        else:
+                            target.append_message('status', status)
                     elif event == 'done':
-                        self.ai_panel.append_message('status', 'Done')
+                        target.append_message('status', 'Done')
                         try:
                             dbg = {'ts': time.time(), 'event': event, 'task_id': data.get('task_id') if isinstance(data, dict) else None}
                             s = json.dumps(dbg, ensure_ascii=False)
                             written = False
                             try:
-                                if hasattr(self.ai_panel, 'append_debug'):
+                                if hasattr(target, 'append_debug'):
                                     try:
-                                        written = bool(self.ai_panel.append_debug(s))
+                                        written = bool(target.append_debug(s))
                                     except Exception:
                                         written = False
                             except Exception:
@@ -520,15 +707,15 @@ class GUIAPI:
                             pass
                     else:
                         # Generic debug status
-                        self.ai_panel.append_message('status', status)
+                        target.append_message('status', status)
                         try:
                             dbg = {'ts': time.time(), 'event': event, 'data': data}
                             s = json.dumps(dbg, ensure_ascii=False)
                             written = False
                             try:
-                                if hasattr(self.ai_panel, 'append_debug'):
+                                if hasattr(target, 'append_debug'):
                                     try:
-                                        written = bool(self.ai_panel.append_debug(s))
+                                        written = bool(target.append_debug(s))
                                     except Exception:
                                         written = False
                             except Exception:
@@ -605,33 +792,48 @@ class GUIAPI:
         worker.start()
         return worker
 
-    def run_ask(self, goal: str, callback=None, error_callback=None):
-        # Fast-path: if direct_chat mode enabled and a provider is available,
-        # call the provider.generate directly and return its output quickly.
+    def run_ask(self, goal: str, callback=None, error_callback=None, provider_override: Optional[str] = None, response_panel=None):
+        """Run a quick provider call when `direct_chat` is enabled, otherwise
+        fall back to the full orchestrator pipeline. Honors `provider_override`
+        and routes UI updates to `response_panel` when provided.
+        """
         try:
-            print(f"[GUIAPI] run_ask received goal (len={len(goal) if goal else 0}) direct_chat={getattr(self,'direct_chat',False)}")
+            print(f"[GUIAPI] run_ask received goal (len={len(goal) if goal else 0}) direct_chat={getattr(self,'direct_chat',False)} provider_override={provider_override}")
+
             if getattr(self, 'direct_chat', False):
                 provider_name = None
                 try:
-                    if hasattr(self.orchestrator, 'providers') and self.orchestrator.providers:
-                        # prefer openrouter if present
-                        if 'openrouter' in self.orchestrator.providers:
+                    provs = getattr(self.orchestrator, 'providers', {}) or {}
+                    # honor explicit override when possible
+                    if provider_override:
+                        if provider_override in provs:
+                            provider_name = provider_override
+                        else:
+                            matches = [k for k in provs.keys() if k.startswith(provider_override)]
+                            if matches:
+                                provider_name = matches[0]
+                    # prefer OpenRouter if no override
+                    if provider_name is None:
+                        if 'openrouter' in provs:
                             provider_name = 'openrouter'
-                        elif 'ollama' in self.orchestrator.providers:
+                        elif 'ollama' in provs:
                             provider_name = 'ollama'
                         else:
-                            provider_name = next(iter(self.orchestrator.providers.keys()))
+                            provider_name = next(iter(provs.keys())) if provs else None
                 except Exception:
                     provider_name = None
+
                 print(f"[GUIAPI] direct_chat provider selected: {provider_name}")
+
                 if provider_name and hasattr(self.orchestrator, 'providers'):
                     provider = self.orchestrator.providers.get(provider_name)
 
-                    # Build a chat-like message list from the AI panel history if available
+                    # Build a chat-like message list from the provided panel history if available
                     messages = []
                     try:
-                        if self.ai_panel and hasattr(self.ai_panel, 'get_history'):
-                            for entry in self.ai_panel.get_history():
+                        hist_panel = response_panel or self.ai_panel
+                        if hist_panel and hasattr(hist_panel, 'get_history'):
+                            for entry in hist_panel.get_history():
                                 if not isinstance(entry, dict):
                                     continue
                                 role = entry.get('role')
@@ -641,10 +843,7 @@ class GUIAPI:
                                 elif role == 'assistant':
                                     messages.append({'role': 'assistant', 'content': text})
                                 else:
-                                    # treat status/debug as system/assistant hints
-                                    messages.append({'role': 'assistant', 'content': text})
-                        else:
-                            messages = []
+                                    messages.append({'role': 'system', 'content': text})
                     except Exception:
                         messages = []
 
@@ -657,15 +856,92 @@ class GUIAPI:
                                 print(f"[GUIAPI] provider.generate START provider={provider_name} messages_len={len(messages)}")
                             except Exception:
                                 pass
-                            out = provider.generate(messages)
+                            # Wrap the provider progress callback so we can route
+                            # streaming events to the UI panel that initiated the call.
+                            def _progress_wrapper(event, d=None):
+                                try:
+                                    if isinstance(d, dict):
+                                        dd = dict(d)
+                                    else:
+                                        dd = {'_raw': d}
+                                    # Attach the response panel so _handle_progress
+                                    # can route updates to it.
+                                    dd['_response_panel'] = response_panel or hist_panel
+                                except Exception:
+                                    dd = {'_response_panel': response_panel or hist_panel}
+                                try:
+                                    self._handle_progress(event, dd)
+                                except Exception:
+                                    pass
+
+                            out = provider.generate(messages, progress_callback=_progress_wrapper)
                             try:
                                 print(f"[GUIAPI] provider.generate RETURN provider={provider_name} type={type(out)}")
                             except Exception:
                                 pass
-                            if isinstance(out, dict):
-                                text = out.get('text') or (out.get('raw') or {}).get('output') or ''
-                            else:
-                                text = str(out)
+
+                            # Prefer the provider's `text` field when available; otherwise
+                            # fall back to stringifying the entire response object.
+                            text = ''
+                            try:
+                                if isinstance(out, dict):
+                                    text = out.get('text') or (out.get('raw') or {}).get('output') or ''
+                                    # If provider returned no text, write raw response to debug
+                                    try:
+                                        if not text:
+                                            dbg = {'ts': time.time(), 'event': 'provider_raw', 'provider': provider_name, 'raw': out}
+                                            s = json.dumps(dbg, ensure_ascii=False)
+                                            written = False
+                                            try:
+                                                if response_panel and hasattr(response_panel, 'append_debug'):
+                                                    try:
+                                                        response_panel.append_debug(s)
+                                                        written = True
+                                                    except Exception:
+                                                        written = False
+                                            except Exception:
+                                                written = False
+                                            if not written:
+                                                try:
+                                                    _write_debug_line(s)
+                                                except Exception:
+                                                    pass
+                                    except Exception:
+                                        pass
+                                else:
+                                    text = str(out)
+                            except Exception:
+                                try:
+                                    text = str(out)
+                                except Exception:
+                                    text = ''
+
+                            # Always write a concise provider return preview for diagnostics
+                            try:
+                                try:
+                                    preview_text = text if isinstance(text, str) else str(text)
+                                except Exception:
+                                    preview_text = ''
+                                dbg2 = {'ts': time.time(), 'event': 'provider_return', 'provider': provider_name, 'text_preview': preview_text[:1000], 'raw_preview': str(out)[:2000]}
+                                s2 = json.dumps(dbg2, ensure_ascii=False)
+                                written2 = False
+                                try:
+                                    if response_panel and hasattr(response_panel, 'append_debug'):
+                                        try:
+                                            response_panel.append_debug(s2)
+                                            written2 = True
+                                        except Exception:
+                                            written2 = False
+                                except Exception:
+                                    written2 = False
+                                if not written2:
+                                    try:
+                                        _write_debug_line(s2)
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+
                             result = {'task_id': str(uuid.uuid4()), 'final_text': text, 'logs': [{'provider': provider_name, 'output_preview': text}], 'raw': out}
                             try:
                                 print(f"[GUIAPI] provider returned text len={len(text)}")
@@ -687,8 +963,8 @@ class GUIAPI:
 
                     def _finished_handler(res):
                         try:
-                            # update UI first
-                            self._on_task_finished(res, origin='direct')
+                            # update UI first (route to response panel when provided)
+                            self._on_task_finished(res, origin='direct', panel=response_panel)
                         except Exception:
                             pass
                         finally:
@@ -777,10 +1053,21 @@ class GUIAPI:
         # Fallback to orchestrator pipeline
         print("[GUIAPI] falling back to orchestrator pipeline")
         t = Task(id=str(uuid.uuid4()), goal=goal)
-        # If this orchestrator has OpenRouter configured, use it by default.
+        # Respect provider_override when provided, otherwise prefer OpenRouter.
         try:
-            if hasattr(self.orchestrator, 'providers') and 'openrouter' in self.orchestrator.providers:
-                t.provider = 'openrouter'
+            provs = getattr(self.orchestrator, 'providers', {}) or {}
+            assigned = None
+            if provider_override:
+                if provider_override in provs:
+                    assigned = provider_override
+                else:
+                    matches = [k for k in provs.keys() if k.startswith(provider_override)]
+                    if matches:
+                        assigned = matches[0]
+            if not assigned and 'openrouter' in provs:
+                assigned = 'openrouter'
+            if assigned:
+                t.provider = assigned
         except Exception:
             pass
         # Indicate prompt was sent
