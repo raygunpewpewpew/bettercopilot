@@ -7,7 +7,7 @@ from typing import Optional
 import re
 
 try:
-    from PySide6.QtWidgets import QWidget, QPlainTextEdit, QVBoxLayout
+    from PySide6.QtWidgets import QWidget, QPlainTextEdit, QVBoxLayout, QLabel
     from PySide6.QtGui import QFont
     PYSIDE = True
 except Exception:
@@ -38,7 +38,21 @@ if PYSIDE:
             super().__init__(parent)
             self.editor = QPlainTextEdit()
             self.editor.setFont(QFont('Courier', 10))
+            try:
+                # Ensure a white editing background for clarity per user request
+                self.editor.setStyleSheet('background: white; color: black;')
+            except Exception:
+                pass
             layout = QVBoxLayout()
+            try:
+                label = QLabel('Editor')
+                try:
+                    label.setStyleSheet('font-weight: bold;')
+                except Exception:
+                    pass
+                layout.addWidget(label)
+            except Exception:
+                pass
             layout.addWidget(self.editor)
             self.setLayout(layout)
             self._current_path = None

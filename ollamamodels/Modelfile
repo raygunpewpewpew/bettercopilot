@@ -1,0 +1,11 @@
+# Point this to the exact filename you downloaded
+FROM ./qwen3.5-9b-instruct-q4_k_m.gguf
+
+# Set the context window to save VRAM (8k is plenty for most tasks)
+PARAMETER num_ctx 8192
+
+# Stop the model from "hallucinating" too much during coding
+PARAMETER temperature 0.7
+
+# Optional: Add a system message for your project
+SYSTEM """You are a helpful coding assistant for the BetterCopilotProject."""

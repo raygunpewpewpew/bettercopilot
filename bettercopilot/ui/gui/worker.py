@@ -12,6 +12,17 @@ try:
 except Exception:
     PYSIDE = False
 
+# If PySide6 is importable but no QApplication instance exists (headless tests),
+# prefer the simple threading fallback to avoid using Qt QObject/Signal machinery
+# which can cause crashes when the Qt event loop is not running.
+#
+if PYSIDE:
+    try:
+        from PySide6.QtCore import QCoreApplication
+        if QCoreApplication.instance() is None:
+            PYSIDE = False
+    except Exception:
+        pass
 
 class SimpleSignal:
     def __init__(self):
@@ -48,6 +59,16 @@ if PYSIDE:
                     res = self._fn(*self._args, **self._kwargs)
                     self.finished.emit(res)
                 except Exception as e:
+                    # Best-effort: log worker exception to global debug before emitting
+                    try:
+                        import traceback, time
+                        try:
+                            from bettercopilot.logging import global_debug
+                            global_debug.write({'ts': time.time(), 'event': 'worker_exception', 'error': str(e), 'trace': traceback.format_exc()})
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
                     self.error.emit(e)
 
             t = threading.Thread(target=_run, daemon=True)
@@ -72,6 +93,16 @@ else:
                     res = self._fn(*self._args, **self._kwargs)
                     self.finished.emit(res)
                 except Exception as e:
+                    # Best-effort: log worker exception to global debug before emitting
+                    try:
+                        import traceback, time
+                        try:
+                            from bettercopilot.logging import global_debug
+                            global_debug.write({'ts': time.time(), 'event': 'worker_exception', 'error': str(e), 'trace': traceback.format_exc()})
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
                     self.error.emit(e)
 
             self._thread = threading.Thread(target=_run, daemon=True)

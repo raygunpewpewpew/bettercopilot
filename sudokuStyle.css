@@ -1,0 +1,20 @@
+
+table {
+  background-image: "url('https://static.klipy.com/ii/d6b0ce929193df3c242ac34b5654d2ce/97/6c/cGjRQ8uT.gif')";
+  border-collapse: collapse;
+  table-layout:fixed;
+}
+
+td {
+  border: 1px solid #000;
+  padding: 0;
+  background-size: cover;
+  object-fit:cover;
+  width:20px;
+  height:20px;
+  text-align: center;
+  
+}
+
+
+

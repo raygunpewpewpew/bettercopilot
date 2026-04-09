@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<title>Sudoku Solver</title>
+	<link rel="stylesheet" href="sudokuStyle.css">
+</head>
+<body>
+  <div class="content">
+	<input type="button" id="buttonSolve" value="Try Solving" />
+	<br />
+	<table id="maintable" ><tbody id="mytbody"></tbody></table>
+  </div>
+<script>
+
+const startingValues = [
+		[8,		"",		"",		"",		3,		5,		2,		"",		""],
+		["",	"",		"",		4,		"",		"",		"",		"",		""],
+		["",	7,		"",		"",		1,		8,		"",		"",		""],
+
+		["",	"",		"",		"",		8,		"",		1,		6,		""],
+		["",	5,		"",		"",		7,		"",		"",		"",		""],
+		["",	8,		9,		"",		2,		6,		5,		3,		""],
+
+		["",	"",		5,		"",		"",		9,		"",		7,		""],
+		["",	"",		8,		3,		"",		1,		4,		"",		""],
+		[9,		"",		1,		"",		"",		"",		6,		"",		8]
+];
+
+const sudokuBoard = [
+    [5, 3, "", "", 7, "", "", "", ""],
+    [6, "", "", 1, 9, 5, "", "", ""],
+    ["", 9, 8, "", "", "", "", 6, ""],
+    [8, "", "", "", 6, "", "", "", 3],
+    [4, "", "", 8, "", 3, "", "", 1],
+    [7, "", "", "", 2, "", "", "", 6],
+    ["", 6, "", "", "", "", 2, 8, ""],
+    ["", "", "", 4, 1, 9, "", "", 5],
+    ["", "", "", "", 8, "", "", 7, 9]
+];
+
+let SolutionArray = JSON.parse(JSON.stringify(sudokuBoard));
+
+document.getElementById('buttonSolve').addEventListener("click", async () => {
+    document.getElementById('buttonSolve').disabled = true;
+
+    await new Promise(requestAnimationFrame);
+    await new Promise(r => setTimeout(r, 0));
+
+    await solveSudoku(SolutionArray);
+
+    document.getElementById('buttonSolve').disabled = false;
+});
+
+/* -------------------------------------------------------
+   CREATE TABLE FROM startingValues
+------------------------------------------------------- */
+
+
+function createSudokuTable() {
+    const tbody = document.getElementById("mytbody");
+    tbody.innerHTML = "";
+
+    for (let row = 0; row < 9; row++) {
+        const tr = document.createElement("tr");
+
+        for (let col = 0; col < 9; col++) {
+            const td = document.createElement("td");
+            td.id = `${row},${col}`;
+            td.className = "sudokuCell";
+
+            const value = SolutionArray[row][col];
+
+            if (value !== "") {
+                // GIVEN
+                td.textContent = value;
+                td.classList.add("given");
+                td.contentEditable = false;
+                SolutionArray[row][col] = Number(value);
+            } else {
+                // USER-EDITABLE
+                td.textContent = "";
+                td.contentEditable = true;
+
+                td.addEventListener("input", (e) => {
+                    const cell = e.target;
+                    let text = cell.textContent.trim();
+
+                    if (!/^[1-9]$/.test(text)) {
+                        cell.textContent = "";
+                        SolutionArray[row][col] = "";
+                        return;
+                    }
+
+                    SolutionArray[row][col] = Number(text);
+                });
+            }
+
+            tr.appendChild(td);
+        }
+
+        tbody.appendChild(tr);
+    }
+}
+
+
+
+
+
+async function solveSudoku(SolutionArray) {
+    let safety = 0;
+
+    while (true) {
+        const progress = await solveOneStep(SolutionArray);
+
+        if (!progress) break; // no more moves
+
+        await new Promise(r => setTimeout(r, 100)); // 0.5 second delay
+
+        safety++;
+        if (safety > 500) break;
+    }
+
+    console.log("Solver finished");
+}
+
+
+async function solveOneStep(SolutionArray) {
+    // 1. Naked singles
+    const naked = await applyOneNakedSingle(SolutionArray);
+    if (naked) return true;
+
+    // 2. Hidden singles
+    const hidden = applyOneHiddenSingle(SolutionArray);
+    if (hidden) return true;
+
+    // Later:
+    // const pairs = applyOneNakedPair(SolutionArray);
+    // if (pairs) return true;
+
+    return false; // no progress
+}
+
+function getPossibleNumbers(SolutionArray, row, col) {
+    const used = new Set();
+
+    // row
+    for (let c = 0; c < 9; c++) {
+        if (SolutionArray[row][c] !== "") used.add(SolutionArray[row][c]);
+    }
+
+    // column
+    for (let r = 0; r < 9; r++) {
+        if (SolutionArray[r][col] !== "") used.add(SolutionArray[r][col]);
+    }
+
+    // 3×3 box
+    const boxRow = Math.floor(row / 3) * 3;
+    const boxCol = Math.floor(col / 3) * 3;
+
+    for (let r = boxRow; r < boxRow + 3; r++) {
+        for (let c = boxCol; c < boxCol + 3; c++) {
+            if (SolutionArray[r][c] !== "") used.add(SolutionArray[r][c]);
+        }
+    }
+
+    const candidates = [];
+    for (let n = 1; n <= 9; n++) {
+        if (!used.has(n)) candidates.push(n);
+    }
+
+    return candidates;
+}
+async function applyOneNakedSingle(SolutionArray) {
+    for (let row = 0; row < 9; row++) {
+        for (let col = 0; col < 9; col++) {
+
+            if (SolutionArray[row][col] === "") {
+                const candidates = getPossibleNumbers(SolutionArray, row, col);
+
+                if (candidates.length === 1) {
+                    const val = candidates[0];
+                    setValueInSolutionArray(SolutionArray, row, col, val);
+
+                    document.getElementById(`${row},${col}`).classList.add("filledBySolver");
+
+                    return true; // stop after ONE fill
+                }
+            }
+        }
+    }
+    return false;
+}
+function applyOneHiddenSingle(SolutionArray) {
+
+    // ---------- ROWS ----------
+    for (let row = 0; row < 9; row++) {
+        const candidateMap = new Map();
+
+        for (let col = 0; col < 9; col++) {
+            if (SolutionArray[row][col] === "") {
+                const candidates = getPossibleNumbers(SolutionArray, row, col);
+                for (const n of candidates) {
+                    if (!candidateMap.has(n)) candidateMap.set(n, []);
+                    candidateMap.get(n).push(col);
+                }
+            }
+        }
+
+        for (const [num, cols] of candidateMap.entries()) {
+            if (cols.length === 1) {
+                const col = cols[0];
+                setValueInSolutionArray(SolutionArray, row, col, num);
+                document.getElementById(`${row},${col}`).classList.add("filledBySolver");
+                return true;
+            }
+        }
+    }
+
+    // ---------- COLUMNS ----------
+    for (let col = 0; col < 9; col++) {
+        const candidateMap = new Map();
+
+        for (let row = 0; row < 9; row++) {
+            if (SolutionArray[row][col] === "") {
+                const candidates = getPossibleNumbers(SolutionArray, row, col);
+                for (const n of candidates) {
+                    if (!candidateMap.has(n)) candidateMap.set(n, []);
+                    candidateMap.get(n).push(row);
+                }
+            }
+        }
+
+        for (const [num, rows] of candidateMap.entries()) {
+            if (rows.length === 1) {
+                const row = rows[0];
+                setValueInSolutionArray(SolutionArray, row, col, num);
+                document.getElementById(`${row},${col}`).classList.add("filledBySolver");
+                return true;
+            }
+        }
+    }
+
+    // ---------- BOXES ----------
+    for (let box = 0; box < 9; box++) {
+        const startRow = Math.floor(box / 3) * 3;
+        const startCol = (box % 3) * 3;
+
+        const candidateMap = new Map();
+
+        for (let r = startRow; r < startRow + 3; r++) {
+            for (let c = startCol; c < startCol + 3; c++) {
+                if (SolutionArray[r][c] === "") {
+                    const candidates = getPossibleNumbers(SolutionArray, r, c);
+                    for (const n of candidates) {
+                        if (!candidateMap.has(n)) candidateMap.set(n, []);
+                        candidateMap.get(n).push([r, c]);
+                    }
+                }
+            }
+        }
+
+        for (const [num, cells] of candidateMap.entries()) {
+            if (cells.length === 1) {
+                const [r, c] = cells[0];
+                setValueInSolutionArray(SolutionArray, r, c, num);
+                document.getElementById(`${r},${c}`).classList.add("filledBySolver");
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+function applyPointingPairs(SolutionArray) {
+    let updated = false;
+
+    // Loop through all 9 boxes
+    for (let box = 0; box < 9; box++) {
+        const startRow = Math.floor(box / 3) * 3;
+        const startCol = (box % 3) * 3;
+
+        // candidateMap: number → list of [row, col]
+        const candidateMap = new Map();
+
+        // Collect candidates inside the box
+        for (let r = startRow; r < startRow + 3; r++) {
+            for (let c = startCol; c < startCol + 3; c++) {
+                if (SolutionArray[r][c] === "") {
+                    const candidates = getPossibleNumbers(SolutionArray, r, c);
+                    for (const n of candidates) {
+                        if (!candidateMap.has(n)) candidateMap.set(n, []);
+                        candidateMap.get(n).push([r, c]);
+                    }
+                }
+            }
+        }
+
+        // For each number, check if all candidates lie in one row or one column
+        for (const [num, cells] of candidateMap.entries()) {
+            if (cells.length <= 1) continue;
+
+            const rows = new Set(cells.map(([r, _]) => r));
+            const cols = new Set(cells.map(([_, c]) => c));
+
+            // ---------- POINTING ROW ----------
+            if (rows.size === 1) {
+                const row = [...rows][0];
+
+                for (let c = 0; c < 9; c++) {
+                    // Skip cells inside the box
+                    if (c >= startCol && c < startCol + 3) continue;
+
+                    if (SolutionArray[row][c] === "") {
+                        const candidates = getPossibleNumbers(SolutionArray, row, c);
+                        if (candidates.includes(num)) {
+                            // Remove num by forcing a re-evaluation
+                            const filtered = candidates.filter(n => n !== num);
+
+                            if (filtered.length === 1) {
+                                const val = filtered[0];
+                                setValueInSolutionArray(SolutionArray, row, c, val);
+                                document.getElementById(`${row},${c}`).classList.add("filledBySolver");
+                            }
+
+                            updated = true;
+                        }
+                    }
+                }
+            }
+
+            // ---------- POINTING COLUMN ----------
+            if (cols.size === 1) {
+                const col = [...cols][0];
+
+                for (let r = 0; r < 9; r++) {
+                    // Skip cells inside the box
+                    if (r >= startRow && r < startRow + 3) continue;
+
+                    if (SolutionArray[r][col] === "") {
+                        const candidates = getPossibleNumbers(SolutionArray, r, col);
+                        if (candidates.includes(num)) {
+                            const filtered = candidates.filter(n => n !== num);
+
+                            if (filtered.length === 1) {
+                                const val = filtered[0];
+                                setValueInSolutionArray(SolutionArray, r, col, val);
+                                document.getElementById(`${r},${col}`).classList.add("filledBySolver");
+                            }
+
+                            updated = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return updated;
+}
+
+function applyNakedPairs(SolutionArray) {
+    let updated = false;
+
+    // Helper: remove numbers from all other cells in a unit
+    function eliminateFromUnit(cells, pairNums, keepIndices) {
+        let changed = false;
+
+        for (let i = 0; i < cells.length; i++) {
+            if (keepIndices.includes(i)) continue; // skip the pair cells
+
+            const [r, c] = cells[i];
+            if (SolutionArray[r][c] === "") {
+                const candidates = getPossibleNumbers(SolutionArray, r, c);
+                const filtered = candidates.filter(n => !pairNums.includes(n));
+
+                if (filtered.length !== candidates.length) {
+                    // A reduction happened
+                    changed = true;
+
+                    // If only one remains, fill it
+                    if (filtered.length === 1) {
+                        const val = filtered[0];
+                        setValueInSolutionArray(SolutionArray, r, c, val);
+                        document.getElementById(`${r},${c}`).classList.add("filledBySolver");
+                    }
+                }
+            }
+        }
+
+        return changed;
+    }
+
+    // ---------- ROWS ----------
+    for (let row = 0; row < 9; row++) {
+        const cells = [];
+        for (let col = 0; col < 9; col++) cells.push([row, col]);
+
+        updated = checkUnitForNakedPairs(SolutionArray, cells) || updated;
+    }
+
+    // ---------- COLUMNS ----------
+    for (let col = 0; col < 9; col++) {
+        const cells = [];
+        for (let row = 0; row < 9; row++) cells.push([row, col]);
+
+        updated = checkUnitForNakedPairs(SolutionArray, cells) || updated;
+    }
+
+    // ---------- BOXES ----------
+    for (let box = 0; box < 9; box++) {
+        const startRow = Math.floor(box / 3) * 3;
+        const startCol = (box % 3) * 3;
+
+        const cells = [];
+        for (let r = startRow; r < startRow + 3; r++) {
+            for (let c = startCol; c < startCol + 3; c++) {
+                cells.push([r, c]);
+            }
+        }
+
+        updated = checkUnitForNakedPairs(SolutionArray, cells) || updated;
+    }
+
+    return updated;
+
+    // ---------- INNER FUNCTION ----------
+    function checkUnitForNakedPairs(SolutionArray, cells) {
+        const candidateMap = new Map(); // "a,b" → list of cell indices
+
+        // Build candidate map
+        for (let i = 0; i < cells.length; i++) {
+            const [r, c] = cells[i];
+            if (SolutionArray[r][c] === "") {
+                const candidates = getPossibleNumbers(SolutionArray, r, c);
+                if (candidates.length === 2) {
+                    const key = candidates.slice().sort().join(",");
+                    if (!candidateMap.has(key)) candidateMap.set(key, []);
+                    candidateMap.get(key).push(i);
+                }
+            }
+        }
+
+        // Look for pairs
+        let changed = false;
+        for (const [key, indices] of candidateMap.entries()) {
+            if (indices.length === 2) {
+                const pairNums = key.split(",").map(Number);
+                changed = eliminateFromUnit(cells, pairNums, indices) || changed;
+            }
+        }
+
+        return changed;
+    }
+}
+
+/* -------------------------------------------------------
+   UTILITY FUNCTIONS
+------------------------------------------------------- */
+
+function isValidGrid(grid) {
+    // rows
+    for (let r = 0; r < 9; r++) {
+        const seen = new Set();
+        for (let c = 0; c < 9; c++) {
+            const v = grid[r][c];
+            if (v === "") continue;
+            if (seen.has(v)) return false;
+            seen.add(v);
+        }
+    }
+
+    // columns
+    for (let c = 0; c < 9; c++) {
+        const seen = new Set();
+        for (let r = 0; r < 9; r++) {
+            const v = grid[r][c];
+            if (v === "") continue;
+            if (seen.has(v)) return false;
+            seen.add(v);
+        }
+    }
+
+    // boxes
+    for (let br = 0; br < 3; br++) {
+        for (let bc = 0; bc < 3; bc++) {
+            const seen = new Set();
+            for (let r = br * 3; r < br * 3 + 3; r++) {
+                for (let c = bc * 3; c < bc * 3 + 3; c++) {
+                    const v = grid[r][c];
+                    if (v === "") continue;
+                    if (seen.has(v)) return false;
+                    seen.add(v);
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+function setValueInSolutionArray(SolutionArray, row, col, value){
+    SolutionArray[row][col] = value;
+    document.getElementById(`${row},${col}`).textContent = value;
+
+    if (!isValidGrid(SolutionArray)) {
+        console.error("Invalid after move", { row, col, value, grid: structuredClone(SolutionArray) });
+    }
+}
+
+function getValueFromSolutionArray(SolutionArray, row, col){
+    return SolutionArray[row][col];
+}
+
+function setCoordinateTrue(x,y){
+    document.getElementById(`${x},${y}`).style.backgroundColor = "lightblue";
+}
+
+function setCoordinateFalse(x,y){
+    document.getElementById(`${x},${y}`).style.backgroundColor = "red";
+}
+
+/* -------------------------------------------------------
+   INITIALIZE TABLE ON LOAD
+------------------------------------------------------- */
+createSudokuTable();
+
+</script>
+</body>
+</html>

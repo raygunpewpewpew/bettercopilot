@@ -20,6 +20,10 @@ except Exception:
     requests = None
 
 from .base import Provider
+try:
+    from bettercopilot.logging import global_debug
+except Exception:
+    global_debug = None
 
 
 class OllamaHTTPProvider(Provider):
@@ -68,6 +72,13 @@ class OllamaHTTPProvider(Provider):
 
         def _append_debug_line(d: Dict[str, Any]):
             try:
+                if global_debug is not None:
+                    try:
+                        global_debug.write(d)
+                        return
+                    except Exception:
+                        pass
+                # fallback: write raw JSON to debug_log.txt candidates
                 candidates = [Path.cwd()]
                 try:
                     pkg_root = Path(__file__).resolve().parents[4]
@@ -286,6 +297,47 @@ class OllamaHTTPProvider(Provider):
             return resp is not None and resp.status_code < 500
         except Exception:
             return False
+
+    def list_models(self, timeout: float = 2.0) -> List[str]:
+        """Return a list of available model ids reported by the Ollama HTTP server.
+
+        This is a best-effort helper: if `requests` is unavailable or the
+        server does not expose a JSON `/v1/models` (or `/models`) endpoint,
+        an empty list is returned.
+        """
+        if self._no_requests:
+            return []
+        try:
+            resp = None
+            try:
+                resp = self.session.get(f"{self.api_url}/v1/models", timeout=timeout)
+            except Exception:
+                try:
+                    resp = self.session.get(f"{self.api_url}/models", timeout=timeout)
+                except Exception:
+                    resp = None
+            if resp is None or getattr(resp, 'status_code', None) is None or resp.status_code >= 400:
+                return []
+            try:
+                j = resp.json()
+            except Exception:
+                return []
+            models = j.get('data') if isinstance(j, dict) and 'data' in j else j
+            out = []
+            if isinstance(models, list):
+                for m in models:
+                    try:
+                        mid = m.get('id') if isinstance(m, dict) else str(m)
+                        if mid:
+                            out.append(mid)
+                    except Exception:
+                        try:
+                            out.append(str(m))
+                        except Exception:
+                            pass
+            return out
+        except Exception:
+            return []
 
     def generate(self, messages: Optional[List[Dict[str, Any]]] = None, tools: Optional[List[Dict]] = None, system: Optional[str] = None, suffix: Optional[str] = None, options: Optional[Dict] = None, progress_callback: Optional[callable] = None) -> Dict[str, Any]:
         """Call Ollama and return a normalized dict with `text`, `tool_calls`, `raw`."""

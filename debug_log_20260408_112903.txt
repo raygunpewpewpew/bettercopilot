@@ -1,0 +1,1 @@
+{"ts": 1775661925.642544, "event": "session_start", "session_id": "d5f92860-56d3-4910-b8a5-88cdb3852fa5", "pid": 24188, "argv": [".\\scripts\\run_gui_launcher.py"]}

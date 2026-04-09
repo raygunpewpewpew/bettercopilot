@@ -6,7 +6,7 @@ import os
 import json
 
 try:
-    from PySide6.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QLineEdit, QPushButton, QHBoxLayout, QLabel
+    from PySide6.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QLineEdit, QPushButton, QHBoxLayout, QLabel, QComboBox, QToolButton, QSizePolicy, QMainWindow, QSplitter
     from PySide6.QtCore import Signal, QFileSystemWatcher, QTimer, QCoreApplication, QRegularExpression
     from PySide6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont
     PYSIDE = True
@@ -29,10 +29,215 @@ class SimpleSignal:
                 pass
 
 
+# Headless (non-Qt) AIPanel implementation usable even when PySide6 is
+# importable but no QApplication instance is running (e.g., headless tests).
+class HeadlessAIPanel:
+    def __init__(self):
+        self.ask = SimpleSignal()
+        self.run_task = SimpleSignal()
+        self.model_selected = SimpleSignal()
+        self._history = []
+        self._debug = []
+        self._status = ''
+        self.provider_name = None
+        self._models = []
+        self._selected_model = None
+
+    def append_message(self, role: str, text: str):
+        try:
+            self._history.append({'role': role, 'text': text})
+        except Exception:
+            self._history.append({'role': role, 'text': str(text)})
+        # Console diagnostics for troubleshooting
+        try:
+            print(f"[AIPanel headless] append_message role={role} len={0 if text is None else len(str(text))}")
+        except Exception:
+            pass
+        # Mirror assistant messages to debug log for troubleshooting
+        try:
+            if role == 'assistant':
+                try:
+                    import json, time
+                    obj = {'ts': time.time(), 'event': 'assistant_append', 'text': text}
+                    try:
+                        if getattr(self, 'provider_name', None):
+                            obj['provider'] = getattr(self, 'provider_name')
+                    except Exception:
+                        pass
+                    s = json.dumps(obj, ensure_ascii=False)
+                    # write to debug_log.txt using same candidate locations as append_debug
+                    candidates = [Path.cwd()]
+                    try:
+                        pkg_root = Path(__file__).resolve().parents[4]
+                        candidates.append(pkg_root)
+                    except Exception:
+                        pass
+                    candidates.append(Path.home())
+                    for base in candidates:
+                        try:
+                            logfile = Path(base) / 'debug_log.txt'
+                            logfile.parent.mkdir(parents=True, exist_ok=True)
+                            with open(logfile, 'a', encoding='utf-8') as f:
+                                f.write(s + '\n')
+                            break
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def update_last_message(self, role: str, text: str):
+        try:
+            if len(getattr(self, '_history', [])) > 0 and self._history[-1].get('role') == role:
+                self._history[-1]['text'] = text
+            else:
+                self._history.append({'role': role, 'text': text})
+        except Exception:
+            try:
+                self._history.append({'role': role, 'text': str(text)})
+            except Exception:
+                pass
+
+    def get_history(self) -> List[Dict]:
+        return list(self._history)
+
+    def set_provider_label(self, provider_name: Optional[str]):
+        try:
+            self.provider_name = provider_name
+        except Exception:
+            pass
+
+    def set_model_list(self, models: List[str], selected: Optional[str] = None):
+        try:
+            self._models = list(models or [])
+            if selected is not None:
+                self._selected_model = selected
+                try:
+                    self.model_selected.emit(selected)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def set_selected_model(self, model: str):
+        try:
+            self._selected_model = model
+            try:
+                self.model_selected.emit(model)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def clear(self):
+        self._history.clear()
+
+    def append_debug(self, text: str):
+        try:
+            s = str(text)
+            pretty = s
+            try:
+                obj = json.loads(s)
+                try:
+                    if getattr(self, 'provider_name', None) and not obj.get('provider'):
+                        obj['provider'] = getattr(self, 'provider_name')
+                except Exception:
+                    pass
+                pretty = json.dumps(obj, ensure_ascii=False, indent=2)
+            except Exception:
+                pretty = s
+            self._debug.append(pretty)
+            try:
+                # write to debug_log.txt with rotation
+                candidates = [Path.cwd()]
+                try:
+                    pkg_root = Path(__file__).resolve().parents[4]
+                    candidates.append(pkg_root)
+                except Exception:
+                    pass
+                candidates.append(Path.home())
+
+                logfile = None
+                for base in candidates:
+                    p = Path(base) / 'debug_log.txt'
+                    if p.exists():
+                        logfile = p
+                        break
+                if logfile is None:
+                    logfile = Path(candidates[0]) / 'debug_log.txt'
+
+                try:
+                    b = len(s.encode('utf-8')) + 1
+                    max_bytes = 5 * 1024 * 1024
+                    if logfile.exists() and logfile.stat().st_size + b > max_bytes:
+                        rotated = logfile.with_name(f"{logfile.stem}_{time.strftime('%Y%m%d_%H%M%S')}.txt")
+                        try:
+                            logfile.replace(rotated)
+                        except Exception:
+                            try:
+                                logfile.rename(rotated)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+                written = False
+                try:
+                    logfile.parent.mkdir(parents=True, exist_ok=True)
+                    try:
+                        json.loads(s)
+                        write_s = s
+                    except Exception:
+                        try:
+                            wrap = {'ts': time.time(), 'event': 'debug_line', 'text': s}
+                            if getattr(self, 'provider_name', None):
+                                wrap['provider'] = getattr(self, 'provider_name')
+                            write_s = json.dumps(wrap, ensure_ascii=False)
+                        except Exception:
+                            write_s = s
+                    with open(logfile, 'a', encoding='utf-8') as f:
+                        f.write(write_s + "\n")
+                    written = True
+                except Exception:
+                    written = False
+                return written
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return False
+
+    def get_debug(self) -> List[str]:
+        return list(getattr(self, '_debug', []))
+
+    def set_status(self, text: str):
+        try:
+            self._status = text if text is not None else ''
+        except Exception:
+            pass
+
+    def get_status(self) -> str:
+        return getattr(self, '_status', '')
+
+
 if PYSIDE:
     class AIPanel(QWidget):
         ask = Signal(str)
         run_task = Signal(dict)
+        model_selected = Signal(str)
+
+        def __new__(cls, *args, **kwargs):
+            # If Qt is importable but no QApplication instance exists
+            # (common in headless test runs), return a headless panel
+            # instance to avoid Qt-related crashes.
+            try:
+                from PySide6.QtCore import QCoreApplication
+                if QCoreApplication.instance() is None:
+                    return HeadlessAIPanel()
+            except Exception:
+                pass
+            return super().__new__(cls)
 
         def __init__(self, parent=None):
             super().__init__(parent)
@@ -43,7 +248,19 @@ if PYSIDE:
                 self.title_label.setStyleSheet('font-weight: bold;')
             except Exception:
                 pass
-            self.layout.addWidget(self.title_label)
+            # Title row (label + optional model selector)
+            self.title_row = QHBoxLayout()
+            self.title_row.addWidget(self.title_label)
+            # Model selector (hidden unless this panel is for Ollama)
+            try:
+                self.model_combo = QComboBox()
+                self.model_combo.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+                self.model_combo.hide()
+                self.title_row.addWidget(self.model_combo)
+            except Exception:
+                self.model_combo = None
+
+            self.layout.addLayout(self.title_row)
             self.history = QTextEdit()
             self.history.setReadOnly(True)
             self.input = QLineEdit()
@@ -51,31 +268,22 @@ if PYSIDE:
             self.status_label = QLabel('')
             self.btn_row = QHBoxLayout()
             self.btn_ask = QPushButton('Ask')
-            self.btn_run = QPushButton('Run Task')
             self.btn_clear = QPushButton('Clear')
             self.btn_row.addWidget(self.btn_ask)
-            self.btn_row.addWidget(self.btn_run)
-            # Debug toggle button (shows/hides expanded debug log)
-            self.btn_debug = QPushButton('Show Debug')
-            self.btn_debug.setCheckable(True)
-            self.btn_row.addWidget(self.btn_debug)
+            # Pop-out button to detach the panel into its own window
+            try:
+                self.btn_popout = QPushButton('Pop Out')
+                self.btn_popout.setCheckable(True)
+                self.btn_row.addWidget(self.btn_popout)
+            except Exception:
+                self.btn_popout = None
             self.btn_row.addWidget(self.btn_clear)
             self.layout.addWidget(self.history)
             self.layout.addWidget(self.input)
             self.layout.addWidget(self.status_label)
-            # Expanded debug log (hidden by default)
-            self.debug_log = QTextEdit()
-            self.debug_log.setReadOnly(True)
-            self.debug_log.hide()
-            # attach JSON highlighter if available
-            try:
-                # JsonHighlighter defined above when PYSIDE is True
-                self._json_highlighter = JsonHighlighter(self.debug_log.document())
-            except Exception:
-                self._json_highlighter = None
-            self.layout.addWidget(self.debug_log)
             self.layout.addLayout(self.btn_row)
             self.setLayout(self.layout)
+            # No enforced minimum sizes; sizing controlled by layout only.
 
         def set_provider_label(self, provider_name: Optional[str]):
             try:
@@ -96,16 +304,30 @@ if PYSIDE:
                 self.input.returnPressed.connect(self._on_ask)
             except Exception:
                 pass
-            # (Fix File button removed)
-            self.btn_run.clicked.connect(lambda: self.run_task.emit({}))
+            # wire buttons
             self.btn_clear.clicked.connect(self.clear)
-            self.btn_debug.toggled.connect(self._toggle_debug)
+
+            try:
+                if getattr(self, 'btn_popout', None):
+                    self.btn_popout.clicked.connect(self._toggle_popout)
+            except Exception:
+                pass
+            try:
+                if getattr(self, 'model_combo', None):
+                    self.model_combo.currentIndexChanged.connect(self._on_model_combo_changed)
+            except Exception:
+                pass
 
             # Debug file auto-refresh state
             self._debug_file_path = None
             self._debug_file_pos = 0
             self._debug_watcher = None
             self._debug_refresh_scheduled = False
+            # Pop-out state
+            self._popped_out = False
+            self._popout_window = None
+            self._dock_splitter = None
+            self._dock_index = None
 
         def _on_ask(self):
             text = self.input.text().strip()
@@ -119,8 +341,18 @@ if PYSIDE:
                     self.history.append(f"[user] {text}")
                 except Exception:
                     pass
+            # Log prompt to global debug (best-effort)
+            try:
+                from bettercopilot.logging import global_debug
+                try:
+                    global_debug.write({'ts': time.time(), 'event': 'user_prompt', 'provider': getattr(self, 'provider_name', None), 'text': text})
+                except Exception:
+                    pass
+            except Exception:
+                pass
             self.ask.emit(text)
             self.input.clear()
+        
 
         def append_message(self, role: str, text: str):
             try:
@@ -165,11 +397,23 @@ if PYSIDE:
                                 dbg['provider'] = getattr(self, 'provider_name')
                         except Exception:
                             pass
-                        s = json.dumps(dbg, ensure_ascii=False)
                         try:
-                            self._write_debug_line(s)
+                            from bettercopilot.logging import global_debug
+                            try:
+                                global_debug.write(dbg)
+                            except Exception:
+                                # fall back to class writer
+                                try:
+                                    s = json.dumps(dbg, ensure_ascii=False)
+                                    self._write_debug_line(s)
+                                except Exception:
+                                    pass
                         except Exception:
-                            pass
+                            try:
+                                s = json.dumps(dbg, ensure_ascii=False)
+                                self._write_debug_line(s)
+                            except Exception:
+                                pass
                     except Exception:
                         pass
             except Exception:
@@ -225,6 +469,186 @@ if PYSIDE:
                     self.append_message(role, text)
                 except Exception:
                     pass
+
+        def _toggle_popout(self):
+            # Lightweight pop-out / dock behavior. Keep logic simple to avoid
+            # nested try/except mismatches and ensure reparenting is robust.
+            if not PYSIDE:
+                return
+
+            if not getattr(self, '_popped_out', False):
+                # discover splitter parent and index
+                parent = self.parent()
+                splitter = None
+                try:
+                    while parent is not None:
+                        if isinstance(parent, QSplitter):
+                            splitter = parent
+                            break
+                        parent = parent.parent()
+                except Exception:
+                    splitter = None
+
+                if splitter is not None:
+                    self._dock_splitter = splitter
+                    try:
+                        for i in range(splitter.count()):
+                            try:
+                                if splitter.widget(i) is self:
+                                    self._dock_index = i
+                                    break
+                            except Exception:
+                                pass
+                    except Exception:
+                        self._dock_index = None
+
+                # detach into a new window
+                try:
+                    self.setParent(None)
+                except Exception:
+                    pass
+                try:
+                    win = QMainWindow()
+                    win.setCentralWidget(self)
+                    self._popout_window = win
+                    self._popped_out = True
+                    try:
+                        win.show()
+                    except Exception:
+                        pass
+                    try:
+                        if getattr(self, 'btn_popout', None):
+                            self.btn_popout.setText('Dock')
+                            self.btn_popout.setChecked(True)
+                    except Exception:
+                        pass
+                except Exception:
+                    # best-effort fallback: leave panel as-is
+                    pass
+            else:
+                # dock back into splitter
+                try:
+                    win = self._popout_window
+                    if win:
+                        try:
+                            win.setCentralWidget(None)
+                        except Exception:
+                            pass
+                        try:
+                            win.close()
+                        except Exception:
+                            pass
+                    if isinstance(self._dock_splitter, QSplitter) and self._dock_index is not None:
+                        try:
+                            self._dock_splitter.insertWidget(self._dock_index, self)
+                        except Exception:
+                            try:
+                                self._dock_splitter.addWidget(self)
+                            except Exception:
+                                pass
+                    else:
+                        try:
+                            self.setParent(None)
+                        except Exception:
+                            pass
+                    self._popped_out = False
+                    self._popout_window = None
+                    try:
+                        if getattr(self, 'btn_popout', None):
+                            self.btn_popout.setText('Pop Out')
+                            self.btn_popout.setChecked(False)
+                    except Exception:
+                        pass
+
+                # close outer try block for docking fallback
+                except Exception:
+                    pass
+
+        def _on_model_combo_changed(self, idx: int):
+            try:
+                if not getattr(self, 'model_combo', None):
+                    return
+                if idx is None or idx < 0:
+                    return
+                try:
+                    model = self.model_combo.itemData(idx)
+                    if model is None:
+                        model = self.model_combo.currentText()
+                except Exception:
+                    model = self.model_combo.currentText()
+                try:
+                    # emit signal so API can update provider configuration
+                    try:
+                        self.model_selected.emit(model)
+                    except Exception:
+                        # fallback: no signal connected
+                        pass
+                except Exception:
+                    pass
+
+            except Exception:
+                pass
+
+        def set_model_list(self, models: List[str], selected: Optional[str] = None):
+            try:
+                if not getattr(self, 'model_combo', None):
+                    return
+                self.model_combo.blockSignals(True)
+                try:
+                    self.model_combo.clear()
+                except Exception:
+                    pass
+                try:
+                    for m in (models or []):
+                        try:
+                            # store model id in itemData
+                            self.model_combo.addItem(str(m), m)
+                        except Exception:
+                            try:
+                                self.model_combo.addItem(str(m))
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+                try:
+                    if selected:
+                        # try to select matching item
+                        idx = -1
+                        for i in range(self.model_combo.count()):
+                            try:
+                                if self.model_combo.itemData(i) == selected or self.model_combo.itemText(i) == selected:
+                                    idx = i
+                                    break
+                            except Exception:
+                                pass
+                        if idx >= 0:
+                            try:
+                                self.model_combo.setCurrentIndex(idx)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+                try:
+                    self.model_combo.show()
+                except Exception:
+                    pass
+                self.model_combo.blockSignals(False)
+            except Exception:
+                pass
+
+        def set_selected_model(self, model: str):
+            try:
+                if not getattr(self, 'model_combo', None) or model is None:
+                    return
+                for i in range(self.model_combo.count()):
+                    try:
+                        if self.model_combo.itemData(i) == model or self.model_combo.itemText(i) == model:
+                            self.model_combo.setCurrentIndex(i)
+                            return
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
         def _toggle_debug(self, checked: bool):
             try:
@@ -299,42 +723,33 @@ if PYSIDE:
 
         def append_debug(self, text: str):
             try:
-                if hasattr(self, 'debug_log'):
-                    s = str(text)
-                    pretty = s
+                # Delegate to global debug logger when available
+                s = str(text)
+                try:
+                    import json
+                    obj = None
                     try:
                         obj = json.loads(s)
-                        # ensure provider metadata is present when panel has a label
+                    except Exception:
+                        obj = {'ts': time.time(), 'event': 'debug_line', 'text': s}
                         try:
-                            if getattr(self, 'provider_name', None) and not obj.get('provider'):
+                            if getattr(self, 'provider_name', None):
                                 obj['provider'] = getattr(self, 'provider_name')
                         except Exception:
                             pass
-                        pretty = json.dumps(obj, ensure_ascii=False, indent=2)
-                        s = json.dumps(obj, ensure_ascii=False)
+                    try:
+                        from bettercopilot.logging import global_debug
+                        global_debug.write(obj)
+                        return True
                     except Exception:
-                        # not JSON: wrap into a JSON object so disk entries include provider
+                        # fallback: write to disk via class method
                         try:
-                            obj = {'ts': time.time(), 'event': 'debug_line', 'text': s}
-                            if getattr(self, 'provider_name', None):
-                                obj['provider'] = getattr(self, 'provider_name')
-                            pretty = json.dumps(obj, ensure_ascii=False, indent=2)
-                            s = json.dumps(obj, ensure_ascii=False)
+                            s2 = json.dumps(obj, ensure_ascii=False)
+                            return bool(self._write_debug_line(s2))
                         except Exception:
-                            pretty = s
-
-                    try:
-                        self.debug_log.append(pretty)
-                        self.debug_log.append('')
-                    except Exception:
-                        pass
-
-                    # Append compact original to disk with rotation (ensure provider present)
-                    try:
-                        written = self._write_debug_line(s)
-                        return bool(written)
-                    except Exception:
-                        return False
+                            return False
+                except Exception:
+                    pass
             except Exception:
                 return False
             return False
@@ -580,10 +995,13 @@ else:
         def __init__(self):
             self.ask = SimpleSignal()
             self.run_task = SimpleSignal()
+            self.model_selected = SimpleSignal()
             self._history = []
             self._debug = []
             self._status = ''
             self.provider_name = None
+            self._models = []
+            self._selected_model = None
 
         def append_message(self, role: str, text: str):
             try:
@@ -646,6 +1064,28 @@ else:
         def set_provider_label(self, provider_name: Optional[str]):
             try:
                 self.provider_name = provider_name
+            except Exception:
+                pass
+
+        def set_model_list(self, models: List[str], selected: Optional[str] = None):
+            try:
+                self._models = list(models or [])
+                if selected is not None:
+                    self._selected_model = selected
+                    try:
+                        self.model_selected.emit(selected)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        def set_selected_model(self, model: str):
+            try:
+                self._selected_model = model
+                try:
+                    self.model_selected.emit(model)
+                except Exception:
+                    pass
             except Exception:
                 pass
 

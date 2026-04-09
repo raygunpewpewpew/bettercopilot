@@ -1,0 +1,1 @@
+{"ts": 1775670698.315629, "event": "assistant_append", "text": "Hello from provider preview.", "provider": "OpenRouter"}

@@ -19,6 +19,17 @@ except Exception:
 
 def run_gui(argv=None, orchestrator=None, workspace_path: Optional[str] = None):
     api = GUIAPI(orchestrator=orchestrator)
+    # Initialize centralized debug logging and lightweight tracing for GUI runs.
+    try:
+        from bettercopilot.logging import global_debug
+        try:
+            # start tracing (logs function calls inside the package)
+            global_debug.start_tracing(True)
+            global_debug.install_exception_hook()
+        except Exception:
+            pass
+    except Exception:
+        pass
     # Print startup info so it's clear which Python interpreter is running
     # and whether PySide6 is available for the native GUI.
     try:

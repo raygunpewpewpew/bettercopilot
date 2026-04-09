@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "C:\Users\surfing\BetterCopilotProject\bettercopilot\bettercopilot\scripts\consensus_runner.py", line 11, in <module>
+    from bettercopilot.ui.gui.api import GUIAPI
+ModuleNotFoundError: No module named 'bettercopilot.ui'
