@@ -20,6 +20,44 @@ except Exception:
 
 if PYSIDE:
     class DebugPanel(QWidget):
+        def __new__(cls, *args, **kwargs):
+            try:
+                from PySide6.QtCore import QCoreApplication
+                if QCoreApplication.instance() is None:
+                    class _Headless:
+                        def __init__(self, parent=None):
+                            self._lines = []
+                            try:
+                                if global_debug is not None:
+                                    global_debug.register_callback(self._on_event)
+                            except Exception:
+                                pass
+
+                        def _on_event(self, event: dict):
+                            try:
+                                import json
+                                s = json.dumps(event, ensure_ascii=False)
+                                self._lines.append(s)
+                            except Exception:
+                                try:
+                                    self._lines.append(str(event))
+                                except Exception:
+                                    pass
+
+                        def append_line(self, s: str):
+                            try:
+                                self._lines.append(str(s))
+                            except Exception:
+                                pass
+
+                        def get_lines(self):
+                            return list(self._lines)
+
+                    return _Headless(*args, **kwargs)
+            except Exception:
+                pass
+            return super().__new__(cls)
+
         def __init__(self, parent=None):
             super().__init__(parent)
             self.layout = QVBoxLayout()
@@ -78,7 +116,6 @@ if PYSIDE:
                 self.debug_view.append(s)
             except Exception:
                 pass
-
 else:
     class DebugPanel:
         def __init__(self):

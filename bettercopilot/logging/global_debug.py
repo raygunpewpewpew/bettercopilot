@@ -16,13 +16,16 @@ from typing import Callable, Optional
 
 _lock = threading.Lock()
 _callbacks = []  # type: list[Callable[[dict], None]]
+_recent_events = []  # recent events buffer for new UI subscribers
+_recent_max = 1000
 
-# default logfile location (project root / debug_log.txt)
+# default logfile location (project root / DebugLogs/debug_log.txt)
+# keep debug files out of repo root in a dedicated folder
 _try_base = Path(__file__).resolve().parents[2]
-_default_log = Path.cwd() / 'debug_log.txt'
+_default_log = Path.cwd() / 'DebugLogs' / 'debug_log.txt'
 try:
     # prefer project root when available
-    _default_log = _try_base / 'debug_log.txt'
+    _default_log = _try_base / 'DebugLogs' / 'debug_log.txt'
 except Exception:
     pass
 
@@ -79,6 +82,16 @@ def write(event: dict, logfile: Optional[Path] = None) -> bool:
             with open(target, 'a', encoding='utf-8') as f:
                 f.write(s + '\n')
             written = True
+            # record recent events for any UI that registers later
+            try:
+                if isinstance(event, dict):
+                    _recent_events.append(event.copy())
+                else:
+                    _recent_events.append({'ts': time.time(), 'event': 'debug', 'text': str(event)})
+                if len(_recent_events) > _recent_max:
+                    del _recent_events[0:len(_recent_events) - _recent_max]
+            except Exception:
+                pass
         except Exception:
             written = False
 
@@ -103,6 +116,15 @@ def register_callback(cb: Callable[[dict], None]):
     try:
         if cb and callable(cb):
             _callbacks.append(cb)
+            # replay recent events to the new subscriber (best-effort)
+            try:
+                for ev in list(_recent_events):
+                    try:
+                        cb(ev)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             return True
     except Exception:
         pass
@@ -210,6 +232,8 @@ def install_exception_hook():
                             write({'ts': time.time(), 'event': 'thread_exception', 'thread': getattr(args, 'thread', None), 'exc_type': str(getattr(args, 'exc_type', None)), 'exc_value': str(getattr(args, 'exc_value', None)), 'trace': tr})
                         except Exception:
                             pass
+                    except Exception:
+                        pass
                 try:
                     _thr.excepthook = _on_thread_ex
                 except Exception:

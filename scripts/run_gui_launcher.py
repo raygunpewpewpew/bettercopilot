@@ -65,7 +65,7 @@ try:
     ts = time.strftime('%Y%m%d_%H%M%S')
     for base in candidates:
         try:
-            logfile = Path(base) / 'debug_log.txt'
+            logfile = Path(base) / 'DebugLogs' / 'debug_log.txt'
             if logfile.exists():
                 try:
                     rotated = logfile.with_name(f"{logfile.stem}_{ts}.txt")
@@ -80,7 +80,7 @@ try:
 
     # Create a new debug log at cwd and write a session marker
     try:
-        target = Path(candidates[0]) / 'debug_log.txt'
+        target = Path(candidates[0]) / 'DebugLogs' / 'debug_log.txt'
         target.parent.mkdir(parents=True, exist_ok=True)
         marker = {'ts': time.time(), 'event': 'session_start', 'session_id': session_id, 'pid': os.getpid(), 'argv': sys.argv}
         with open(target, 'a', encoding='utf-8') as f:

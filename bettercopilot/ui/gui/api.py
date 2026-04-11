@@ -166,7 +166,7 @@ def _write_debug_line(s: str, max_bytes: int = 5 * 1024 * 1024) -> bool:
 
     for base in candidates:
         try:
-            logfile = Path(base) / 'debug_log.txt'
+            logfile = Path(base) / 'DebugLogs' / 'debug_log.txt'
             # rotate if necessary
             try:
                 b = len(s.encode('utf-8')) + 1
@@ -532,6 +532,15 @@ class GUIAPI:
                 self.editor.load_file(path)
                 if self.ai_panel:
                     self.ai_panel.append_message('system', f'Opened {path}')
+                # Log file-open to centralized debug
+                try:
+                    from bettercopilot.logging import global_debug
+                    try:
+                        global_debug.write({'ts': time.time(), 'event': 'file_open', 'path': path})
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
             except Exception:
                 if self.status_bar:
                     self.status_bar.set_message(f'Failed to open {path}')
@@ -1447,6 +1456,15 @@ class GUIAPI:
                         try:
                             try:
                                 print(f"[GUIAPI] provider.generate START provider={provider_name} messages_len={len(messages)}")
+                            except Exception:
+                                pass
+                            # Emit a concise provider-call start event for debug/observability
+                            try:
+                                from bettercopilot.logging import global_debug
+                                try:
+                                    global_debug.write({'ts': time.time(), 'event': 'provider_call_start', 'provider': provider_name, 'messages_len': len(messages), 'messages_preview': str(messages)[:2000]})
+                                except Exception:
+                                    pass
                             except Exception:
                                 pass
                             # Wrap the provider progress callback so we can route

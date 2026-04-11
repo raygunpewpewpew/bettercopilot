@@ -1,0 +1,25 @@
+1775943599.7129605 guiapi_initialized PYSIDE=True
+1775943644.0315142 guiapi_initialized PYSIDE=True
+1775943644.0318193 before_start_tracing
+1775943644.032123 starting_tracing_call
+1775943707.81279 guiapi_initialized PYSIDE=True
+1775943707.813097 before_start_tracing
+1775943707.813408 skipping_start_tracing
+1775943707.8157704 creating_qapplication
+1775943707.85519 qapplication_created
+1775943708.0138426 main_window_instantiated class=MainWindow
+1775943708.0571773 main_window_show_called
+1775943781.3015037 guiapi_initialized PYSIDE=True
+1775943781.301829 before_start_tracing
+1775943781.3115785 skipping_start_tracing
+1775943781.3136795 creating_qapplication
+1775943781.3489926 qapplication_created
+1775943781.4657605 main_window_instantiated class=MainWindow
+1775943781.4925694 main_window_show_called
+1775946106.7575927 guiapi_initialized PYSIDE=True
+1775946106.758328 before_start_tracing
+1775946106.758625 skipping_start_tracing
+1775946106.7611694 creating_qapplication
+1775946106.8036861 qapplication_created
+1775946106.9957535 main_window_instantiated class=MainWindow
+1775946107.0404274 main_window_show_called

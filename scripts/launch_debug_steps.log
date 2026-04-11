@@ -1,0 +1,20 @@
+START
+importing main_window
+imported main_window
+instantiate FileTreePanel
+START2
+importing main_window
+imported main_window
+instantiate FileTreePanel
+FileTreePanel OK
+instantiate EditorPanel
+EditorPanel OK
+instantiate AIPanel
+AIPanel OK
+instantiate DiffViewer
+DiffViewer OK
+instantiate DebugPanel
+DebugPanel OK
+instantiate StatusBar
+StatusBar OK
+ALL DONE2

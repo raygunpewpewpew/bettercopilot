@@ -34,6 +34,49 @@ class EditorPanelBase:
 
 if PYSIDE:
     class EditorPanel(QWidget, EditorPanelBase):
+        def __new__(cls, *args, **kwargs):
+            try:
+                from PySide6.QtCore import QCoreApplication
+                if QCoreApplication.instance() is None:
+                    class _Headless:
+                        def __init__(self):
+                            self._text = ''
+                            self._path = None
+
+                        def load_file(self, path: str):
+                            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+                                self._text = f.read()
+                            self._path = path
+
+                        def get_text(self) -> str:
+                            return self._text
+
+                        def set_text(self, text: str):
+                            self._text = text
+
+                        def save_file(self, path: Optional[str] = None):
+                            p = path or self._path
+                            if not p:
+                                return False
+                            with open(p, 'w', encoding='utf-8') as f:
+                                f.write(self._text)
+                            return True
+
+                        def apply_diff(self, diff_text: str = None, final_text: str = None):
+                            if final_text is not None:
+                                return
+                            if diff_text:
+                                try:
+                                    self._text = _apply_unified_diff(self._text, diff_text)
+                                except Exception:
+                                    pass
+                                self._text = final_text
+
+                    return _Headless()
+            except Exception:
+                pass
+            return super().__new__(cls)
+
         def __init__(self, parent=None):
             super().__init__(parent)
             self.editor = QPlainTextEdit()

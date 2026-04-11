@@ -1,5 +1,6 @@
 """Main window assembling the GUI panels. Provides a headless facade when PySide6 unavailable."""
 from typing import Optional
+import time
 
 # Detect PySide6 availability by attempting to import the Qt modules
 # and bind the commonly used classes. Some PySide6 builds expose certain
@@ -87,9 +88,33 @@ if PYSIDE:
                 left_container = QWidget()
                 left_layout = QtWidgets.QVBoxLayout()
                 left_layout.setContentsMargins(0, 0, 0, 0)
-                left_layout.addWidget(self.file_tree)
+                # Prefer the file tree to take most vertical space and keep
+                # the debug panel compact below it so the tree remains visible.
                 try:
-                    left_layout.addWidget(self.debug_panel)
+                    self.file_tree.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+                except Exception:
+                    pass
+                try:
+                    self.debug_panel.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+                except Exception:
+                    pass
+                # Add with stretch: file_tree gets larger share (3), debug_panel smaller (1)
+                left_layout.addWidget(self.file_tree, 3)
+                try:
+                    left_layout.addWidget(self.debug_panel, 1)
+                except Exception:
+                    pass
+                # As a safety, set explicit stretch factors if available
+                try:
+                    idx_tree = left_layout.indexOf(self.file_tree)
+                    if idx_tree >= 0:
+                        left_layout.setStretch(idx_tree, 3)
+                except Exception:
+                    pass
+                try:
+                    idx_dbg = left_layout.indexOf(self.debug_panel)
+                    if idx_dbg >= 0:
+                        left_layout.setStretch(idx_dbg, 1)
                 except Exception:
                     pass
                 left_container.setLayout(left_layout)
@@ -429,6 +454,26 @@ if PYSIDE:
                             self.move(cx, cy)
                         except Exception:
                             pass
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+            # Emit a debug event so external runners can detect that the
+            # main window was shown and inspect geometry/state.
+            try:
+                try:
+                    from bettercopilot.logging import global_debug
+                    try:
+                        geom = None
+                        try:
+                            g = self.geometry()
+                            geom = f"{g.x()},{g.y()},{g.width()},{g.height()}"
+                        except Exception:
+                            geom = None
+                        global_debug.write({'ts': time.time(), 'event': 'main_window_shown', 'geometry': geom, 'maximized': bool(getattr(self, 'isMaximized', lambda: False)())})
+                    except Exception:
+                        pass
                 except Exception:
                     pass
             except Exception:

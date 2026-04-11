@@ -28,6 +28,26 @@ if PYSIDE:
     class DiffViewer(QWidget):
         apply_patch = Signal(dict)
 
+        def __new__(cls, *args, **kwargs):
+            try:
+                from PySide6.QtCore import QCoreApplication
+                if QCoreApplication.instance() is None:
+                    class _Headless:
+                        def __init__(self, parent=None):
+                            self.apply_patch = SimpleSignal()
+                            self._diff_text = ''
+
+                        def set_diff(self, diff_text: str):
+                            self._diff_text = diff_text
+
+                        def get_diff(self) -> str:
+                            return self._diff_text
+
+                    return _Headless(*args, **kwargs)
+            except Exception:
+                pass
+            return super().__new__(cls)
+
         def __init__(self, parent=None):
             super().__init__(parent)
             self.layout = QVBoxLayout()
@@ -50,7 +70,6 @@ if PYSIDE:
 
         def set_diff(self, diff_text: str):
             self.text.setPlainText(diff_text)
-
 else:
     class DiffViewer:
         def __init__(self):

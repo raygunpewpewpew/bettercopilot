@@ -88,7 +88,7 @@ class OllamaHTTPProvider(Provider):
                 candidates.append(Path.home())
                 for base in candidates:
                     try:
-                        logfile = Path(base) / 'debug_log.txt'
+                        logfile = Path(base) / 'DebugLogs' / 'debug_log.txt'
                         logfile.parent.mkdir(parents=True, exist_ok=True)
                         with open(logfile, 'a', encoding='utf-8') as f:
                             f.write(json.dumps(d, ensure_ascii=False) + '\n')

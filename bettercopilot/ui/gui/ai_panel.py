@@ -75,7 +75,7 @@ class HeadlessAIPanel:
                     candidates.append(Path.home())
                     for base in candidates:
                         try:
-                            logfile = Path(base) / 'debug_log.txt'
+                            logfile = Path(base) / 'DebugLogs' / 'debug_log.txt'
                             logfile.parent.mkdir(parents=True, exist_ok=True)
                             with open(logfile, 'a', encoding='utf-8') as f:
                                 f.write(s + '\n')
@@ -160,12 +160,12 @@ class HeadlessAIPanel:
 
                 logfile = None
                 for base in candidates:
-                    p = Path(base) / 'debug_log.txt'
+                    p = Path(base) / 'DebugLogs' / 'debug_log.txt'
                     if p.exists():
                         logfile = p
                         break
                 if logfile is None:
-                    logfile = Path(candidates[0]) / 'debug_log.txt'
+                    logfile = Path(candidates[0]) / 'DebugLogs' / 'debug_log.txt'
 
                 try:
                     b = len(s.encode('utf-8')) + 1
@@ -664,7 +664,7 @@ if PYSIDE:
 
                     logfile = None
                     for base in candidates:
-                        p = Path(base) / 'debug_log.txt'
+                        p = Path(base) / 'DebugLogs' / 'debug_log.txt'
                         if p.exists():
                             logfile = p
                             break
@@ -685,9 +685,14 @@ if PYSIDE:
                                             # debug lines that match the provider or are global
                                             prov = obj.get('provider') if isinstance(obj, dict) else None
                                             label = getattr(self, 'provider_name', None)
-                                            if label and prov and prov != label:
-                                                # skip entries for other providers
-                                                continue
+                                            if label and prov:
+                                                try:
+                                                    # Compare provider labels case-insensitively
+                                                    if str(prov).lower() != str(label).lower():
+                                                        continue
+                                                except Exception:
+                                                    # If comparison fails, skip mismatched entries
+                                                    continue
                                             pretty = json.dumps(obj, ensure_ascii=False, indent=2)
                                             self.debug_log.append(pretty)
                                             self.debug_log.append('')
@@ -1126,7 +1131,7 @@ else:
                             logfile = p
                             break
                     if logfile is None:
-                        logfile = Path(candidates[0]) / 'debug_log.txt'
+                        logfile = Path(candidates[0]) / 'DebugLogs' / 'debug_log.txt'
 
                     # rotate if necessary
                     try:

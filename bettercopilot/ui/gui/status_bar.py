@@ -26,6 +26,25 @@ class SimpleSignal:
 
 if PYSIDE:
     class StatusBar(QStatusBar):
+        def __new__(cls, *args, **kwargs):
+            try:
+                from PySide6.QtCore import QCoreApplication
+                if QCoreApplication.instance() is None:
+                    class _Headless:
+                        def __init__(self, parent=None):
+                            self._message = 'Ready'
+
+                        def set_message(self, msg: Optional[str]):
+                            self._message = msg or ''
+
+                        def get_message(self) -> str:
+                            return self._message
+
+                    return _Headless(*args, **kwargs)
+            except Exception:
+                pass
+            return super().__new__(cls)
+
         def __init__(self, parent=None):
             super().__init__(parent)
             self._label = QLabel('Ready')

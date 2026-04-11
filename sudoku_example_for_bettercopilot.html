@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<title>Sudoku Solver (Example for BetterCopilot)</title>
+	<link rel="stylesheet" href="sudokuStyle.css">
+</head>
+<body>
+  <div class="content">
+	<input type="button" id="buttonSolve" value="Try Solving" />
+	<br />
+	<table id="maintable" ><tbody id="mytbody"></tbody></table>
+  </div>
+<script>
+
+const startingValues = [
+		[8,		"", 		"",		"",		3,		5,		2,		"",		""],
+		["",	"",		"",		4,		"",		"",		"",		"",		""],
+		["",7,		"",		"",		1,		8,		"",		"",		""],
+
+		["",	"",		"",		"",		8,		"",		1,		6,		""],
+		["",5,		"",		"",		7,		"",		"",		"",		""],
+		["",8,		9,		"",		2,		6,		5,		3,		""],
+
+		["",	"",		5,		"",		"",		9,		"",		7,		""],
+		["",	"",		8,		3,		"",		1,		4,		"",		""],
+		[9,		"",		1,		"",		"",		"",		6,		"",		8]
+];
+
+const sudokuBoard = [
+    [5, 3, "", "", 7, "", "", "", ""],
+    [6, "", "", 1, 9, 5, "", "", ""],
+    ["", 9, 8, "", "", "", "", 6, ""],
+    [8, "", "", "", 6, "", "", "", 3],
+    [4, "", "", 8, "", 3, "", "", 1],
+    [7, "", "", "", 2, "", "", "", 6],
+    ["", 6, "", "", "", "", 2, 8, ""],
+    ["", "", "", 4, 1, 9, "", "", 5],
+    ["", "", "", "", 8, "", "", 7, 9]
+];
+
+let SolutionArray = JSON.parse(JSON.stringify(sudokuBoard));
+
+document.getElementById('buttonSolve').addEventListener("click", async () => {
+    document.getElementById('buttonSolve').disabled = true;
+
+    await new Promise(requestAnimationFrame);
+    await new Promise(r => setTimeout(r, 0));
+
+    await solveSudoku(SolutionArray);
+
+    document.getElementById('buttonSolve').disabled = false;
+});
+
+/* -------------------------------------------------------
+   CREATE TABLE FROM startingValues
+------------------------------------------------------- */
+
+
+function createSudokuTable() {
+    const tbody = document.getElementById("mytbody");
+    tbody.innerHTML = "";
+
+    for (let row = 0; row < 9; row++) {
+        const tr = document.createElement("tr");
+
+        for (let col = 0; col < 9; col++) {
+            const td = document.createElement("td");
+            td.id = `${row},${col}`;
+            td.className = "sudokuCell";
+
+            const value = SolutionArray[row][col];
+
+            if (value !== "") {
+                // GIVEN
+                td.textContent = value;
+                td.classList.add("given");
+                td.contentEditable = false;
+                SolutionArray[row][col] = Number(value);
+            } else {
+                // USER-EDITABLE
+                td.textContent = "";
+                td.contentEditable = true;
+
+                td.addEventListener("input", (e) => {
+                    const cell = e.target;
+                    let text = cell.textContent.trim();
+
+                    if (!/^[1-9]$/.test(text)) {
+                        cell.textContent = "";
+                        SolutionArray[row][col] = "";
+                        return;
+                    }
+
+                    SolutionArray[row][col] = Number(text);
+                });
+            }
+
+            tr.appendChild(td);
+        }
+
+        tbody.appendChild(tr);
+    }
+}
+
+
+
+
+async function solveSudoku(SolutionArray) {
+    // Prevent concurrent solver runs which could race to dispatch notifications
+    const globalObj = (typeof globalThis !== 'undefined') ? globalThis : (typeof window !== 'undefined') ? window : (typeof self !== 'undefined') ? self : undefined;
+    if (globalObj && globalObj.__sudokuSolveInProgress) {
+        console.warn('solveSudoku: already in progress, ignoring concurrent call');
+        return;
+    }
+
+    try {
+        if (globalObj) { try { globalObj.__sudokuSolveInProgress = true; } catch (e) {} }
+
+        // Allow tests/headless runs to configure step delay (ms). Default 100ms.
+        const stepDelay = (globalObj && typeof globalObj.__SUDOKU_STEP_DELAY_MS === 'number') ? globalObj.__SUDOKU_STEP_DELAY_MS : 100;
+
+        let safety = 0;
+
+        while (true) {
+            const progress = await solveOneStep(SolutionArray);
+
+            if (!progress) break; // no more moves
+
+            await new Promise(r => setTimeout(r, stepDelay)); // stepDelay ms
+
+            safety++;
+            if (safety > 500) break;
+        }
+
+        console.log("Solver finished");
+        // If the solver completed with a fully-filled board, notify listeners
+        try {
+            const isSolved = Array.isArray(SolutionArray)
+                && SolutionArray.length > 0
+                && SolutionArray.every(r => Array.isArray(r) && r.every(c => c !== "" && c != null));
+            if (isSolved) {
+                // Use a stable global for lifecycle flags (works in browsers, workers, tests)
+                const notifiedSetKey = '__sudokuSolvedNotifiedSet';
+
+                // Build or fetch a per-solution signature and a global Set to track notifications
+                let notifiedSet = null;
+                try {
+                    if (globalObj) {
+                        notifiedSet = globalObj[notifiedSetKey];
+                        if (!notifiedSet) {
+                            try { globalObj[notifiedSetKey] = new Set(); } catch (e) {}
+                            notifiedSet = globalObj[notifiedSetKey];
+                        }
+                    }
+                } catch (e) { notifiedSet = null; }
+
+                let solutionSignature = null;
+                try { solutionSignature = JSON.stringify(SolutionArray); } catch (e) { solutionSignature = String(Date.now()); }
+
+                if (notifiedSet && notifiedSet.has(solutionSignature)) {
+                    // already notified for this exact solution
+                } else {
+                    // Provide a safe clone so consumers can't mutate internal state
+                    let solutionClone;
+                    try {
+                        if (typeof structuredClone === 'function') {
+                            solutionClone = structuredClone(SolutionArray);
+                        } else {
+                            // fast, safe fallback for a plain 2D array
+                            solutionClone = JSON.parse(JSON.stringify(SolutionArray));
+                        }
+                    } catch (e) {
+                        // Last-resort shallow deep-copy for arrays of primitives
+                        solutionClone = SolutionArray.map(r => Array.isArray(r) ? r.slice() : r);
+                    }
+
+                    // Dispatch a non-blocking, cross-environment CustomEvent (with fallback)
+                    try {
+                        let evt = null;
+                        if (typeof CustomEvent === 'function') {
+                            evt = new CustomEvent('sudokuSolved', { detail: { solution: solutionClone } });
+                        } else if (typeof document !== 'undefined' && document.createEvent) {
+                            evt = document.createEvent('CustomEvent');
+                            evt.initCustomEvent('sudokuSolved', false, false, { solution: solutionClone });
+                        }
+
+                        if (evt) {
+                            let dispatched = false;
+                            if (globalObj && typeof globalObj.dispatchEvent === 'function') {
+                                try { globalObj.dispatchEvent(evt); dispatched = true; } catch (e) {}
+                            } else if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+                                try { window.dispatchEvent(evt); dispatched = true; } catch (e) {}
+                            } else if (typeof document !== 'undefined' && typeof document.dispatchEvent === 'function') {
+                                try { document.dispatchEvent(evt); dispatched = true; } catch (e) {}
+                            }
+
+                            // Test/runtime fallback: allow an injectable handler on the global for headless/test environments
+                            if (!dispatched && globalObj && typeof globalObj.onSudokuSolved === 'function') {
+                                try { globalObj.onSudokuSolved({ detail: { solution: solutionClone } }); dispatched = true; } catch (e) {}
+                            }
+
+                            // Expose last detail for test inspection where needed
+                            try { if (globalObj) globalObj.__lastSudokuSolvedDetail = solutionClone; } catch (e) {}
+
+                            // Mark notified in the Set when dispatch succeeded
+                            if (dispatched && notifiedSet && typeof notifiedSet.add === 'function') {
+                                try { notifiedSet.add(solutionSignature); } catch (ignore) {}
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('Could not dispatch sudokuSolved event', e);
+                    }
+
+                    // Accessible, non-blocking announcement (preferred over alert)
+                    try {
+                        if (typeof document !== 'undefined') {
+                            const announcerId = 'sudoku-announcer';
+                            let announcer = document.getElementById(announcerId);
+                            if (!announcer) {
+                                announcer = document.createElement('div');
+                                announcer.id = announcerId;
+                                // Keep it visually hidden but available to assistive tech
+                                announcer.style.position = 'absolute';
+                                announcer.style.left = '-9999px';
+                                announcer.style.width = '1px';
+                                announcer.style.height = '1px';
+                                announcer.style.overflow = 'hidden';
+                                if (document.body) {
+                                    document.body.appendChild(announcer);
+                                } else if (document.documentElement) {
+                                    document.documentElement.appendChild(announcer);
+                                } else {
+                                    document.addEventListener('DOMContentLoaded', () => { try { document.body && document.body.appendChild(announcer); } catch (ignore) {} });
+                                }
+                            }
+
+                            // Ensure ARIA attributes are present and atomic so screen readers read the full message
+                            announcer.setAttribute('role', 'status');
+                            announcer.setAttribute('aria-live', 'polite');
+                            announcer.setAttribute('aria-atomic', 'true');
+
+                            // Reset then set text to ensure repeated announcements are picked up
+                            announcer.textContent = '';
+                            setTimeout(() => { try { announcer.textContent = 'Puzzle solved!'; } catch (ignore) {} }, 50);
+                        } else {
+                            console.info('Puzzle solved!');
+                        }
+                    } catch (e) {
+                        console.warn('Announcement failed when signaling solved state', e);
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('Error checking solved state', e);
+        }
+    } finally {
+        try { if (globalObj) globalObj.__sudokuSolveInProgress = false; } catch (e) {}
+    }
+}
+
+
+async function solveOneStep(SolutionArray) {
+    // 1. Naked singles
+    const naked = await applyOneNakedSingle(SolutionArray);
+    if (naked) return true;
+
+    // 2. Hidden singles
+    const hidden = applyOneHiddenSingle(SolutionArray);
+    if (hidden) return true;
+
+    // Later:
+    // const pairs = applyOneNakedPair(SolutionArray);
+    // if (pairs) return true;
+
+    return false; // no progress
+}
+
+function getPossibleNumbers(SolutionArray, row, col) {
+    const used = new Set();
+
+    // row
+    for (let c = 0; c < 9; c++) {
+        if (SolutionArray[row][c] !== "") used.add(SolutionArray[row][c]);
+    }
+
+    // column
+    for (let r = 0; r < 9; r++) {
+        if (SolutionArray[r][col] !== "") used.add(SolutionArray[r][col]);
+    }
+
+    // 3×3 box
+    const boxRow = Math.floor(row / 3) * 3;
+    const boxCol = Math.floor(col / 3) * 3;
+
+    for (let r = boxRow; r < boxRow + 3; r++) {
+        for (let c = boxCol; c < boxCol + 3; c++) {
+            if (SolutionArray[r][c] !== "") used.add(SolutionArray[r][c]);
+        }
+    }
+
+    const candidates = [];
+    for (let n = 1; n <= 9; n++) {
+        if (!used.has(n)) candidates.push(n);
+    }
+
+    return candidates;
+}
+async function applyOneNakedSingle(SolutionArray) {
+    for (let row = 0; row < 9; row++) {
+        for (let col = 0; col < 9; col++) {
+
+            if (SolutionArray[row][col] === "") {
+                const candidates = getPossibleNumbers(SolutionArray, row, col);
+
+                if (candidates.length === 1) {
+                    const val = candidates[0];
+                    setValueInSolutionArray(SolutionArray, row, col, val);
+
+                    document.getElementById(`${row},${col}`).classList.add("filledBySolver");
+
+                    return true; // stop after ONE fill
+                }
+            }
+        }
+    }
+    return false;
+}
+function applyOneHiddenSingle(SolutionArray) {
+
+    // ---------- ROWS ----------
+    for (let row = 0; row < 9; row++) {
+        const candidateMap = new Map();
+
+        for (let col = 0; col < 9; col++) {
+            if (SolutionArray[row][col] === "") {
+                const candidates = getPossibleNumbers(SolutionArray, row, col);
+                for (const n of candidates) {
+                    if (!candidateMap.has(n)) candidateMap.set(n, []);
+                    candidateMap.get(n).push(col);
+                }
+            }
+        }
+
+        for (const [num, cols] of candidateMap.entries()) {
+            if (cols.length === 1) {
+                const col = cols[0];
+                setValueInSolutionArray(SolutionArray, row, col, num);
+                document.getElementById(`${row},${col}`).classList.add("filledBySolver");
+                return true;
+            }
+        }
+    }
+
+    // ---------- COLUMNS ----------
+    for (let col = 0; col < 9; col++) {
+        const candidateMap = new Map();
+
+        for (let row = 0; row < 9; row++) {
+            if (SolutionArray[row][col] === "") {
+                const candidates = getPossibleNumbers(SolutionArray, row, col);
+                for (const n of candidates) {
+                    if (!candidateMap.has(n)) candidateMap.set(n, []);
+                    candidateMap.get(n).push(row);
+                }
+            }
+        }
+
+        for (const [num, rows] of candidateMap.entries()) {
+            if (rows.length === 1) {
+                const row = rows[0];
+                setValueInSolutionArray(SolutionArray, row, col, num);
+                document.getElementById(`${row},${col}`).classList.add("filledBySolver");
+                return true;
+            }
+        }
+    }
+
+    // ---------- BOXES ----------
+    for (let box = 0; box < 9; box++) {
+        const startRow = Math.floor(box / 3) * 3;
+        const startCol = (box % 3) * 3;
+
+        const candidateMap = new Map();
+
+        for (let r = startRow; r < startRow + 3; r++) {
+            for (let c = startCol; c < startCol + 3; c++) {
+                if (SolutionArray[r][c] === "") {
+                    const candidates = getPossibleNumbers(SolutionArray, r, c);
+                    for (const n of candidates) {
+                        if (!candidateMap.has(n)) candidateMap.set(n, []);
+                        candidateMap.get(n).push([r, c]);
+                    }
+                }
+            }
+        }
+
+        for (const [num, cells] of candidateMap.entries()) {
+            if (cells.length === 1) {
+                const [r, c] = cells[0];
+                setValueInSolutionArray(SolutionArray, r, c, num);
+                document.getElementById(`${r},${c}`).classList.add("filledBySolver");
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+function setValueInSolutionArray(SolutionArray, row, col, val) {
+    SolutionArray[row][col] = val;
+    const td = document.getElementById(`${row},${col}`);
+    if (td) td.textContent = val;
+}
+
+</script>
+</body>
+</html>
